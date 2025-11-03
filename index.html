@@ -307,11 +307,15 @@ async function loadState() {
             
             // Debounce saves to prevent conflicts
             saveTimeout = setTimeout(async () => {
+                const mapData = mapImage ? canvas.toDataURL('image/jpeg', 0.7) : null;
                 const state = {
-                    mapData: mapImage ? canvas.toDataURL('image/jpeg', 0.8) : null,
+                    mapData: mapData,
                     tokens: tokens,
                     timestamp: Date.now()
                 };
+                
+                console.log('Saving state, map exists:', !!mapData, 'tokens:', tokens.length);
+                
                 try {
                     await set(ref(db, 'gameState'), state);
                     statusEl.textContent = '✓ Synced';
