@@ -171,16 +171,14 @@
 
         // Save config
         document.getElementById('saveConfig').addEventListener('click', () => {
-            try {
-                const configText = document.getElementById('firebaseConfig').value;
+     
+                const configText = firebaseConfig;
                 const config = JSON.parse(configText);
                 localStorage.setItem('firebaseConfig', configText);
                 initFirebase(config);
                 document.getElementById('configModal').classList.add('hidden');
-            } catch (e) {
-                alert('Invalid JSON config. Please check your Firebase config.');
-            }
-        });
+            } 
+        );
 
         function initFirebase(config) {
             try {
