@@ -52,86 +52,11 @@
         .error {
             color: #ff2a2a;
         }
-        #configModal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.95);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-        #configModal.hidden {
-            display: none;
-        }
-        .modal-content {
-            background: #2a2a2a;
-            padding: 20px;
-            border-radius: 8px;
-            max-width: 500px;
-            width: 90%;
-        }
-        .modal-content h2 {
-            margin-bottom: 15px;
-            font-size: 18px;
-        }
-        .modal-content textarea {
-            width: 100%;
-            height: 200px;
-            background: #1a1a1a;
-            color: #fff;
-            border: 1px solid #4a4a4a;
-            padding: 10px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 11px;
-            margin-bottom: 10px;
-        }
-        .modal-content button {
-            width: 100%;
-            padding: 10px;
-            background: #4a4a4a;
-            color: #fff;
-            border: none;
-            cursor: pointer;
-            border-radius: 4px;
-        }
-        .modal-content button:hover {
-            background: #5a5a5a;
-        }
-        .modal-content .help {
-            font-size: 11px;
-            color: #aaa;
-            margin-bottom: 10px;
-        }
     </style>
 </head>
 <body>
-    <div id="configModal">
-        <div class="modal-content">
-            <h2>🔥 Firebase Configuration</h2>
-            <div class="help">
-                Paste the same Firebase config your DM is using.<br>
-                Ask your DM for the config from their Firebase Console.
-            </div>
-            <textarea id="firebaseConfig" placeholder='{
-  "apiKey": "your-api-key",
-  "authDomain": "your-app.firebaseapp.com",
-  "databaseURL": "https://your-app.firebaseio.com",
-  "projectId": "your-project-id",
-  "storageBucket": "your-app.appspot.com",
-  "messagingSenderId": "123456789",
-  "appId": "your-app-id"
-}'></textarea>
-            <button id="saveConfig">Connect</button>
-        </div>
-    </div>
-
     <div id="header">
-        <span class="status waiting" id="status">⚙️ Configure Firebase</span>
+        <span class="status waiting" id="status">⏳ Connecting...</span>
     </div>
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
@@ -149,47 +74,28 @@
         let mapImage = null;
         let tokens = [];
 
-		const firebaseConfig = {
-		apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
-		authDomain: "dnd-mapshare.firebaseapp.com",
-		databaseURL: "https://dnd-mapshare-default-rtdb.europe-west1.firebasedatabase.app",
-		projectId: "dnd-mapshare",
-		storageBucket: "dnd-mapshare.firebasestorage.app",
-		messagingSenderId: "624008039203",
-		appId: "1:624008039203:web:46ee20fd32f7d8f4f95a96"
-		};	
-        // Check for saved config
-        const savedConfig = firebaseConfig;
-        if (savedConfig) {
-            try {
-                initFirebase(JSON.parse(savedConfig));
-                document.getElementById('configModal').classList.add('hidden');
-            } catch (e) {
-                console.error('Invalid saved config:', e);
-            }
-        }
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
+            authDomain: "dnd-mapshare.firebaseapp.com",
+            databaseURL: "https://dnd-mapshare-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "dnd-mapshare",
+            storageBucket: "dnd-mapshare.firebasestorage.app",
+            messagingSenderId: "624008039203",
+            appId: "1:624008039203:web:46ee20fd32f7d8f4f95a96"
+        };
 
-        // Save config
-        document.getElementById('saveConfig').addEventListener('click', () => {
-     
-                const config = firebaseConfig;
-                initFirebase(config);
-                document.getElementById('configModal').classList.add('hidden');
-            } 
-        );
-
-        function initFirebase(config) {
-            try {
-                const app = initializeApp(config);
-                db = getDatabase(app);
-                statusEl.textContent = '⏳ Waiting for DM...';
-                statusEl.className = 'status waiting';
-                listenForUpdates();
-            } catch (e) {
-                statusEl.textContent = '✗ Connection failed';
-                statusEl.classList.add('error');
-                console.error('Firebase init error:', e);
-            }
+        // Initialize Firebase
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getDatabase(app);
+            statusEl.textContent = '⏳ Waiting for DM...';
+            statusEl.className = 'status waiting';
+            listenForUpdates();
+        } catch (e) {
+            statusEl.textContent = '✗ Connection failed';
+            statusEl.className = 'status error';
+            console.error('Firebase init error:', e);
         }
 
         function listenForUpdates() {
@@ -222,7 +128,7 @@
                 }
             }, (error) => {
                 statusEl.textContent = '✗ Connection error';
-                statusEl.classList.add('error');
+                statusEl.className = 'status error';
                 console.error('Firebase read error:', error);
             });
         }

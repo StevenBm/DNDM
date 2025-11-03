@@ -44,9 +44,16 @@
         button.active {
             background: #2a7fff;
         }
-        input[type="file"] {
+        input[type="file"], select {
             font-size: 11px;
             color: #fff;
+            background: #2a2a2a;
+            border: 1px solid #4a4a4a;
+            padding: 6px;
+            border-radius: 4px;
+        }
+        select {
+            cursor: pointer;
         }
         input[type="text"] {
             background: #2a2a2a;
@@ -72,6 +79,9 @@
             display: block;
             cursor: crosshair;
         }
+        #mapCanvas.move-mode {
+            cursor: move;
+        }
         .label {
             font-size: 11px;
             color: #aaa;
@@ -84,53 +94,7 @@
         .error {
             color: #ff2a2a;
         }
-        #configModal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-        #configModal.hidden {
-            display: none;
-        }
-        .modal-content {
-            background: #2a2a2a;
-            padding: 20px;
-            border-radius: 8px;
-            max-width: 500px;
-            width: 90%;
-        }
-        .modal-content h2 {
-            margin-bottom: 15px;
-            font-size: 18px;
-        }
-        .modal-content textarea {
-            width: 100%;
-            height: 200px;
-            background: #1a1a1a;
-            color: #fff;
-            border: 1px solid #4a4a4a;
-            padding: 10px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 11px;
-            margin-bottom: 10px;
-        }
-        .modal-content button {
-            width: 100%;
-            padding: 10px;
-        }
-        .modal-content .help {
-            font-size: 11px;
-            color: #aaa;
-            margin-bottom: 10px;
-        }
+
     </style>
 </head>
 <body>
@@ -142,19 +106,29 @@
                 Firebase Console → Project Settings → Your apps → Config
             </div>
             <textarea id="firebaseConfig" placeholder='{
-  blablabla}'></textarea>
+  "apiKey": "your-api-key",
+  "authDomain": "your-app.firebaseapp.com",
+  "databaseURL": "https://your-app.firebaseio.com",
+  "projectId": "your-project-id",
+  "storageBucket": "your-app.appspot.com",
+  "messagingSenderId": "123456789",
+  "appId": "your-app-id"
+}'></textarea>
             <button id="saveConfig">Save & Connect</button>
         </div>
     </div>
 
     <div id="controls">
+        <select id="mapLibrary">
+            <option value="">Select from library...</option>
+        </select>
         <input type="file" id="mapUpload" accept="image/*">
         <button id="addPlayer">+ Player</button>
         <button id="addEnemy">+ Enemy</button>
         <input type="text" id="tokenName" placeholder="Token name">
-        <button id="clearAll">Clear All</button>
+        <button id="clearTokens">Clear Tokens</button>
         <span class="label">Mode:</span>
-        <button id="modeSelect" class="active">Select</button>
+        <button id="modeMove" class="active">Move</button>
         <button id="modePlace">Place</button>
         <span class="status" id="status">⚙️ Configure Firebase</span>
     </div>
@@ -175,19 +149,71 @@
         let tokens = [];
         let selectedToken = null;
         let dragOffset = { x: 0, y: 0 };
-        let mode = 'select';
+        let mode = 'move';
         let placeType = null;
-		const firebaseConfig = {
-		apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
-		authDomain: "dnd-mapshare.firebaseapp.com",
-		databaseURL: "https://dnd-mapshare-default-rtdb.europe-west1.firebasedatabase.app",
-		projectId: "dnd-mapshare",
-		storageBucket: "dnd-mapshare.firebasestorage.app",
-		messagingSenderId: "624008039203",
-		appId: "1:624008039203:web:46ee20fd32f7d8f4f95a96"
-		};	
+
+        // Map library structure - edit this to match your GitHub folder structure
+        const mapLibrary = {
+            "Story A": {
+                "Town A": {
+                    "Town Square": "maps/story-a/town-a/townsquare.jpg",
+                    "Mayor House": "maps/story-a/town-a/mayorhouse.jpg"
+                },
+                "Town B": {
+                    "Market": "maps/story-a/town-b/market.jpg"
+                }
+            },
+            "Story B": {
+                "Dungeon": {
+                    "Entrance": "maps/story-b/dungeon/entrance.jpg",
+                    "Boss Room": "maps/story-b/dungeon/bossroom.jpg"
+                }
+            }
+        };
+
+        // Build dropdown
+        function buildMapDropdown() {
+            const select = document.getElementById('mapLibrary');
+            for (const [story, locations] of Object.entries(mapLibrary)) {
+                for (const [location, maps] of Object.entries(locations)) {
+                    for (const [mapName, mapPath] of Object.entries(maps)) {
+                        const option = document.createElement('option');
+                        option.value = mapPath;
+                        option.textContent = `${story} → ${location} → ${mapName}`;
+                        select.appendChild(option);
+                    }
+                }
+            }
+        }
+
+        buildMapDropdown();
+
+        // Load map from library
+        document.getElementById('mapLibrary').addEventListener('change', (e) => {
+            const mapPath = e.target.value;
+            if (mapPath) {
+                loadMapFromUrl(mapPath);
+                e.target.value = ''; // Reset dropdown
+            }
+        });
+
+        function loadMapFromUrl(url) {
+            const img = new Image();
+            img.onload = () => {
+                mapImage = img;
+                canvas.width = img.width;
+                canvas.height = img.height;
+                renderMap();
+                saveState();
+            };
+            img.onerror = () => {
+                alert('Failed to load map from: ' + url);
+            };
+            img.src = url;
+        }
+
         // Check for saved config
-        const savedConfig = firebaseConfig;
+        const savedConfig = localStorage.getItem('firebaseConfig');
         if (savedConfig) {
             try {
                 initFirebase(JSON.parse(savedConfig));
@@ -199,10 +225,15 @@
 
         // Save config
         document.getElementById('saveConfig').addEventListener('click', () => {
-                const config = firebaseConfig;
+            try {
+                const configText = document.getElementById('firebaseConfig').value;
+                const config = JSON.parse(configText);
+                localStorage.setItem('firebaseConfig', configText);
                 initFirebase(config);
                 document.getElementById('configModal').classList.add('hidden');
-           
+            } catch (e) {
+                alert('Invalid JSON config. Please check your Firebase config.');
+            }
         });
 
         function initFirebase(config) {
@@ -307,16 +338,19 @@
         }
 
         // Mode switching
-        document.getElementById('modeSelect').addEventListener('click', () => {
-            mode = 'select';
+        document.getElementById('modeMove').addEventListener('click', () => {
+            mode = 'move';
             placeType = null;
-            document.getElementById('modeSelect').classList.add('active');
+            canvas.classList.remove('crosshair');
+            canvas.classList.add('move-mode');
+            document.getElementById('modeMove').classList.add('active');
             document.getElementById('modePlace').classList.remove('active');
         });
 
         document.getElementById('modePlace').addEventListener('click', () => {
             mode = 'place';
-            document.getElementById('modeSelect').classList.remove('active');
+            canvas.classList.remove('move-mode');
+            document.getElementById('modeMove').classList.remove('active');
             document.getElementById('modePlace').classList.add('active');
         });
 
@@ -324,15 +358,17 @@
         document.getElementById('addPlayer').addEventListener('click', () => {
             mode = 'place';
             placeType = 'player';
+            canvas.classList.remove('move-mode');
             document.getElementById('modePlace').classList.add('active');
-            document.getElementById('modeSelect').classList.remove('active');
+            document.getElementById('modeMove').classList.remove('active');
         });
 
         document.getElementById('addEnemy').addEventListener('click', () => {
             mode = 'place';
             placeType = 'enemy';
+            canvas.classList.remove('move-mode');
             document.getElementById('modePlace').classList.add('active');
-            document.getElementById('modeSelect').classList.remove('active');
+            document.getElementById('modeMove').classList.remove('active');
         });
 
         // Canvas interactions
@@ -348,11 +384,12 @@
                 document.getElementById('tokenName').value = '';
                 renderMap();
                 saveState();
-                mode = 'select';
+                mode = 'move';
                 placeType = null;
-                document.getElementById('modeSelect').classList.add('active');
+                canvas.classList.add('move-mode');
+                document.getElementById('modeMove').classList.add('active');
                 document.getElementById('modePlace').classList.remove('active');
-            } else if (mode === 'select') {
+            } else if (mode === 'move') {
                 selectedToken = tokens.find(t => 
                     Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
                 );
@@ -363,7 +400,7 @@
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            if (selectedToken && mode === 'select') {
+            if (selectedToken && mode === 'move') {
                 const rect = canvas.getBoundingClientRect();
                 selectedToken.x = e.clientX - rect.left - dragOffset.x;
                 selectedToken.y = e.clientY - rect.top - dragOffset.y;
@@ -378,8 +415,8 @@
             selectedToken = null;
         });
 
-        // Clear all
-        document.getElementById('clearAll').addEventListener('click', () => {
+        // Clear tokens only
+        document.getElementById('clearTokens').addEventListener('click', () => {
             if (confirm('Clear all tokens?')) {
                 tokens = [];
                 renderMap();
@@ -402,6 +439,8 @@
                 saveState();
             }
         });
+
+        canvas.classList.add('move-mode');
     </script>
 </body>
 </html>
