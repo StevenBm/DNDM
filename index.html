@@ -162,8 +162,8 @@
             try {
                 // Try to fetch the maps directory listing from GitHub
                 // Note: This requires your repo to be public or use GitHub API with token
-                const repoOwner = 'StevenBm'; // CHANGE THIS
-                const repoName = 'DNDM'; // CHANGE THIS
+                const repoOwner = 'YOUR_GITHUB_USERNAME'; // CHANGE THIS
+                const repoName = 'YOUR_REPO_NAME'; // CHANGE THIS
                 const branch = 'main'; // or 'master'
                 
                 const response = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/git/trees/${branch}?recursive=1`);
@@ -227,18 +227,22 @@
             // Clear existing options except first
             select.innerHTML = '<option value="">Select from library...</option>';
             
-            for (const [story, locations] of Object.entries(mapLibrary)) {
-                for (const [location, maps] of Object.entries(locations)) {
-                    if (typeof maps === 'object' && !Array.isArray(maps)) {
-                        for (const [mapName, mapPath] of Object.entries(maps)) {
-                            const option = document.createElement('option');
-                            option.value = mapPath;
-                            option.textContent = `${story} → ${location} → ${mapName}`;
-                            select.appendChild(option);
-                        }
+            function addMapsRecursive(obj, prefix = '') {
+                for (const [key, value] of Object.entries(obj)) {
+                    if (typeof value === 'string') {
+                        // It's a map path
+                        const option = document.createElement('option');
+                        option.value = value;
+                        option.textContent = prefix + key;
+                        select.appendChild(option);
+                    } else if (typeof value === 'object' && value !== null) {
+                        // It's a nested folder
+                        addMapsRecursive(value, prefix + key + ' → ');
                     }
                 }
             }
+            
+            addMapsRecursive(mapLibrary);
         }
 
         scanMapsFolder();
