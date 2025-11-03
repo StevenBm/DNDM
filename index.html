@@ -94,30 +94,9 @@
         .error {
             color: #ff2a2a;
         }
-
     </style>
 </head>
 <body>
-    <div id="configModal">
-        <div class="modal-content">
-            <h2>🔥 Firebase Configuration</h2>
-            <div class="help">
-                Paste your Firebase config object here. Get it from:<br>
-                Firebase Console → Project Settings → Your apps → Config
-            </div>
-            <textarea id="firebaseConfig" placeholder='{
-  "apiKey": "your-api-key",
-  "authDomain": "your-app.firebaseapp.com",
-  "databaseURL": "https://your-app.firebaseio.com",
-  "projectId": "your-project-id",
-  "storageBucket": "your-app.appspot.com",
-  "messagingSenderId": "123456789",
-  "appId": "your-app-id"
-}'></textarea>
-            <button id="saveConfig">Save & Connect</button>
-        </div>
-    </div>
-
     <div id="controls">
         <select id="mapLibrary">
             <option value="">Select from library...</option>
@@ -130,7 +109,7 @@
         <span class="label">Mode:</span>
         <button id="modeMove" class="active">Move</button>
         <button id="modePlace">Place</button>
-        <span class="status" id="status">⚙️ Configure Firebase</span>
+        <span class="status" id="status">🔄 Connecting...</span>
     </div>
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
@@ -151,6 +130,29 @@
         let dragOffset = { x: 0, y: 0 };
         let mode = 'move';
         let placeType = null;
+
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
+            authDomain: "dnd-mapshare.firebaseapp.com",
+            databaseURL: "https://dnd-mapshare-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "dnd-mapshare",
+            storageBucket: "dnd-mapshare.firebasestorage.app",
+            messagingSenderId: "624008039203",
+            appId: "1:624008039203:web:46ee20fd32f7d8f4f95a96"
+        };
+
+        // Initialize Firebase
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getDatabase(app);
+            statusEl.textContent = '✓ Connected to Firebase';
+            loadState();
+        } catch (e) {
+            statusEl.textContent = '✗ Firebase connection failed';
+            statusEl.classList.add('error');
+            console.error('Firebase init error:', e);
+        }
 
         // Map library structure - edit this to match your GitHub folder structure
         const mapLibrary = {
@@ -210,44 +212,6 @@
                 alert('Failed to load map from: ' + url);
             };
             img.src = url;
-        }
-
-        // Check for saved config
-        const savedConfig = localStorage.getItem('firebaseConfig');
-        if (savedConfig) {
-            try {
-                initFirebase(JSON.parse(savedConfig));
-                document.getElementById('configModal').classList.add('hidden');
-            } catch (e) {
-                console.error('Invalid saved config:', e);
-            }
-        }
-
-        // Save config
-        document.getElementById('saveConfig').addEventListener('click', () => {
-            try {
-                const configText = document.getElementById('firebaseConfig').value;
-                const config = JSON.parse(configText);
-                localStorage.setItem('firebaseConfig', configText);
-                initFirebase(config);
-                document.getElementById('configModal').classList.add('hidden');
-            } catch (e) {
-                alert('Invalid JSON config. Please check your Firebase config.');
-            }
-        });
-
-        function initFirebase(config) {
-            try {
-                const app = initializeApp(config);
-                db = getDatabase(app);
-                statusEl.textContent = '✓ Connected to Firebase';
-                statusEl.classList.remove('error');
-                loadState();
-            } catch (e) {
-                statusEl.textContent = '✗ Firebase connection failed';
-                statusEl.classList.add('error');
-                console.error('Firebase init error:', e);
-            }
         }
 
         async function loadState() {
