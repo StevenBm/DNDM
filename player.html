@@ -173,7 +173,6 @@
         document.getElementById('saveConfig').addEventListener('click', () => {
      
                 const config = firebaseConfig;
-                localStorage.setItem('firebaseConfig', configText);
                 initFirebase(config);
                 document.getElementById('configModal').classList.add('hidden');
             } 
