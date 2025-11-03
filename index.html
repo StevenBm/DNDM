@@ -1,4 +1,11 @@
-<!DOCTYPE html>
+async function loadState() {
+            if (!db) return;
+            const stateRef = ref(db, 'gameState');
+            onValue(stateRef, (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    // Load map if it exists and is different
+                    if (data.mapData)<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -271,46 +278,52 @@
             img.src = url;
         }
 
-        async function loadState() {
+        function loadState() {
             if (!db) return;
             const stateRef = ref(db, 'gameState');
             onValue(stateRef, (snapshot) => {
                 const data = snapshot.val();
                 if (data) {
-                    if (data.mapData) {
-                        const img = new Image();
-                        img.onload = () => {
-                            mapImage = img;
-                            canvas.width = img.width;
-                            canvas.height = img.height;
+                    // Only update tokens if we're not currently dragging
+                    if (!selectedToken && data.tokens) {
+                        tokens = data.tokens;
+                        if (mapImage) {
                             renderMap();
-                        };
-                        img.src = data.mapData;
+                        }
                     }
-                    tokens = data.tokens || [];
-                    renderMap();
                 }
             });
         }
 
+        let saveTimeout = null;
+
         async function saveState() {
             if (!db) return;
-            const state = {
-                mapData: mapImage ? canvas.toDataURL('image/jpeg', 0.8) : null,
-                tokens: tokens,
-                timestamp: Date.now()
-            };
-            try {
-                await set(ref(db, 'gameState'), state);
-                statusEl.textContent = '✓ Synced';
-                setTimeout(() => {
-                    statusEl.textContent = '✓ Connected to Firebase';
-                }, 1000);
-            } catch (e) {
-                statusEl.textContent = '✗ Sync failed';
-                statusEl.classList.add('error');
-                console.error('Save error:', e);
+            
+            // Clear any pending save
+            if (saveTimeout) {
+                clearTimeout(saveTimeout);
             }
+            
+            // Debounce saves to prevent conflicts
+            saveTimeout = setTimeout(async () => {
+                const state = {
+                    mapData: mapImage ? canvas.toDataURL('image/jpeg', 0.8) : null,
+                    tokens: tokens,
+                    timestamp: Date.now()
+                };
+                try {
+                    await set(ref(db, 'gameState'), state);
+                    statusEl.textContent = '✓ Synced';
+                    setTimeout(() => {
+                        statusEl.textContent = '✓ Connected to Firebase';
+                    }, 1000);
+                } catch (e) {
+                    statusEl.textContent = '✗ Sync failed';
+                    statusEl.classList.add('error');
+                    console.error('Save error:', e);
+                }
+            }, 100);
         }
 
         // Map upload
@@ -431,9 +444,9 @@
 
         canvas.addEventListener('mouseup', () => {
             if (selectedToken) {
+                selectedToken = null;
                 saveState();
             }
-            selectedToken = null;
         });
 
         // Clear tokens only
