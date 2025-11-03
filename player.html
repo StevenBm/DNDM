@@ -124,7 +124,13 @@
                         };
                         // Add cache buster to force reload
                         const cacheBuster = data.timestamp || Date.now();
-                        img.src = data.mapData.includes('?') ? data.mapData : data.mapData + '?t=' + cacheBuster;
+					if (data.mapData.startsWith('data:image')) {
+						// Base64 image, use directly
+							img.src = data.mapData;
+					} else {
+						// Normal URL, add cache buster
+						img.src = data.mapData.includes('?') ? data.mapData : data.mapData + '?t=' + cacheBuster;
+					}
                     } else {
                         tokens = (data.tokens || []).filter(t => t.type === 'player');
                         if (mapImage) {
