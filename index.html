@@ -72,95 +72,197 @@
             display: block;
             cursor: crosshair;
         }
-        .token {
-            position: absolute;
-            border-radius: 50%;
-            border: 3px solid;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 14px;
-            cursor: move;
-            user-select: none;
-        }
-        .player {
-            background: rgba(42, 127, 255, 0.8);
-            border-color: #2a7fff;
-        }
-        .enemy {
-            background: rgba(255, 42, 42, 0.8);
-            border-color: #ff2a2a;
-        }
         .label {
             font-size: 11px;
             color: #aaa;
             margin-left: 5px;
         }
+        .status {
+            color: #2a7fff;
+            font-size: 11px;
+        }
+        .error {
+            color: #ff2a2a;
+        }
+        #configModal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        #configModal.hidden {
+            display: none;
+        }
+        .modal-content {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 500px;
+            width: 90%;
+        }
+        .modal-content h2 {
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .modal-content textarea {
+            width: 100%;
+            height: 200px;
+            background: #1a1a1a;
+            color: #fff;
+            border: 1px solid #4a4a4a;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+        .modal-content button {
+            width: 100%;
+            padding: 10px;
+        }
+        .modal-content .help {
+            font-size: 11px;
+            color: #aaa;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
+    <div id="configModal">
+        <div class="modal-content">
+            <h2>🔥 Firebase Configuration</h2>
+            <div class="help">
+                Paste your Firebase config object here. Get it from:<br>
+                Firebase Console → Project Settings → Your apps → Config
+            </div>
+            <textarea id="firebaseConfig" placeholder='{
+  blablabla}'></textarea>
+            <button id="saveConfig">Save & Connect</button>
+        </div>
+    </div>
+
     <div id="controls">
         <input type="file" id="mapUpload" accept="image/*">
         <button id="addPlayer">+ Player</button>
         <button id="addEnemy">+ Enemy</button>
         <input type="text" id="tokenName" placeholder="Token name">
         <button id="clearAll">Clear All</button>
-        <button id="syncPlayers">Sync to Players</button>
         <span class="label">Mode:</span>
         <button id="modeSelect" class="active">Select</button>
         <button id="modePlace">Place</button>
+        <span class="status" id="status">⚙️ Configure Firebase</span>
     </div>
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
     </div>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getDatabase, ref, set, onValue } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
         const canvas = document.getElementById('mapCanvas');
         const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        
+        let db = null;
         let mapImage = null;
         let tokens = [];
         let selectedToken = null;
         let dragOffset = { x: 0, y: 0 };
         let mode = 'select';
         let placeType = null;
-
-        // Load saved state
-        async function loadState() {
+		const firebaseConfig = {
+		apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
+		authDomain: "dnd-mapshare.firebaseapp.com",
+		databaseURL: "https://dnd-mapshare-default-rtdb.europe-west1.firebasedatabase.app",
+		projectId: "dnd-mapshare",
+		storageBucket: "dnd-mapshare.firebasestorage.app",
+		messagingSenderId: "624008039203",
+		appId: "1:624008039203:web:46ee20fd32f7d8f4f95a96"
+		};	
+        // Check for saved config
+        const savedConfig = firebaseConfig;
+        if (savedConfig) {
             try {
-                const result = await window.storage.get('dnd_master_state', true);
-                if (result) {
-                    const state = JSON.parse(result.value);
-                    if (state.mapData) {
-                        const img = new Image();
-                        img.onload = () => {
-                            mapImage = img;
-                            resizeCanvas();
-                        };
-                        img.src = state.mapData;
-                    }
-                    tokens = state.tokens || [];
-                    renderTokens();
-                }
+                initFirebase(JSON.parse(savedConfig));
+                document.getElementById('configModal').classList.add('hidden');
             } catch (e) {
-                console.log('No saved state found');
+                console.error('Invalid saved config:', e);
             }
         }
 
-        // Save state
+        // Save config
+        document.getElementById('saveConfig').addEventListener('click', () => {
+            try {
+                const configText = document.getElementById('firebaseConfig').value;
+                const config = JSON.parse(configText);
+                localStorage.setItem('firebaseConfig', configText);
+                initFirebase(config);
+                document.getElementById('configModal').classList.add('hidden');
+            } catch (e) {
+                alert('Invalid JSON config. Please check your Firebase config.');
+            }
+        });
+
+        function initFirebase(config) {
+            try {
+                const app = initializeApp(config);
+                db = getDatabase(app);
+                statusEl.textContent = '✓ Connected to Firebase';
+                statusEl.classList.remove('error');
+                loadState();
+            } catch (e) {
+                statusEl.textContent = '✗ Firebase connection failed';
+                statusEl.classList.add('error');
+                console.error('Firebase init error:', e);
+            }
+        }
+
+        async function loadState() {
+            if (!db) return;
+            const stateRef = ref(db, 'gameState');
+            onValue(stateRef, (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    if (data.mapData) {
+                        const img = new Image();
+                        img.onload = () => {
+                            mapImage = img;
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            renderMap();
+                        };
+                        img.src = data.mapData;
+                    }
+                    tokens = data.tokens || [];
+                    renderMap();
+                }
+            });
+        }
+
         async function saveState() {
+            if (!db) return;
             const state = {
-                mapData: mapImage ? canvas.toDataURL() : null,
-                tokens: tokens
+                mapData: mapImage ? canvas.toDataURL('image/jpeg', 0.8) : null,
+                tokens: tokens,
+                timestamp: Date.now()
             };
             try {
-                await window.storage.set('dnd_master_state', JSON.stringify(state), true);
-                await window.storage.set('dnd_player_view', JSON.stringify({
-                    mapData: state.mapData,
-                    tokens: tokens.filter(t => t.type === 'player')
-                }), true);
+                await set(ref(db, 'gameState'), state);
+                statusEl.textContent = '✓ Synced';
+                setTimeout(() => {
+                    statusEl.textContent = '✓ Connected to Firebase';
+                }, 1000);
             } catch (e) {
-                console.error('Save failed:', e);
+                statusEl.textContent = '✗ Sync failed';
+                statusEl.classList.add('error');
+                console.error('Save error:', e);
             }
         }
 
@@ -173,7 +275,9 @@
                     const img = new Image();
                     img.onload = () => {
                         mapImage = img;
-                        resizeCanvas();
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        renderMap();
                         saveState();
                     };
                     img.src = event.target.result;
@@ -181,13 +285,6 @@
                 reader.readAsDataURL(file);
             }
         });
-
-        function resizeCanvas() {
-            if (!mapImage) return;
-            canvas.width = mapImage.width;
-            canvas.height = mapImage.height;
-            renderMap();
-        }
 
         function renderMap() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -243,7 +340,7 @@
             document.getElementById('modeSelect').classList.remove('active');
         });
 
-        // Canvas click
+        // Canvas interactions
         canvas.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
@@ -295,12 +392,6 @@
             }
         });
 
-        // Sync
-        document.getElementById('syncPlayers').addEventListener('click', () => {
-            saveState();
-            alert('Synced! Players will see updated map and player tokens.');
-        });
-
         // Delete token on right-click
         canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
@@ -316,8 +407,6 @@
                 saveState();
             }
         });
-
-        loadState();
     </script>
 </body>
 </html>

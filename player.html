@@ -46,46 +46,189 @@
         .status {
             color: #2a7fff;
         }
+        .waiting {
+            color: #ff9500;
+        }
+        .error {
+            color: #ff2a2a;
+        }
+        #configModal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        #configModal.hidden {
+            display: none;
+        }
+        .modal-content {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 500px;
+            width: 90%;
+        }
+        .modal-content h2 {
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .modal-content textarea {
+            width: 100%;
+            height: 200px;
+            background: #1a1a1a;
+            color: #fff;
+            border: 1px solid #4a4a4a;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+        .modal-content button {
+            width: 100%;
+            padding: 10px;
+            background: #4a4a4a;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .modal-content button:hover {
+            background: #5a5a5a;
+        }
+        .modal-content .help {
+            font-size: 11px;
+            color: #aaa;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
+    <div id="configModal">
+        <div class="modal-content">
+            <h2>🔥 Firebase Configuration</h2>
+            <div class="help">
+                Paste the same Firebase config your DM is using.<br>
+                Ask your DM for the config from their Firebase Console.
+            </div>
+            <textarea id="firebaseConfig" placeholder='{
+  "apiKey": "your-api-key",
+  "authDomain": "your-app.firebaseapp.com",
+  "databaseURL": "https://your-app.firebaseio.com",
+  "projectId": "your-project-id",
+  "storageBucket": "your-app.appspot.com",
+  "messagingSenderId": "123456789",
+  "appId": "your-app-id"
+}'></textarea>
+            <button id="saveConfig">Connect</button>
+        </div>
+    </div>
+
     <div id="header">
-        <span class="status">Waiting for DM...</span>
+        <span class="status waiting" id="status">⚙️ Configure Firebase</span>
     </div>
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
     </div>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getDatabase, ref, onValue } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
         const canvas = document.getElementById('mapCanvas');
         const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        
+        let db = null;
         let mapImage = null;
         let tokens = [];
 
-        async function loadPlayerView() {
+		const firebaseConfig = {
+		apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
+		authDomain: "dnd-mapshare.firebaseapp.com",
+		databaseURL: "https://dnd-mapshare-default-rtdb.europe-west1.firebasedatabase.app",
+		projectId: "dnd-mapshare",
+		storageBucket: "dnd-mapshare.firebasestorage.app",
+		messagingSenderId: "624008039203",
+		appId: "1:624008039203:web:46ee20fd32f7d8f4f95a96"
+		};	
+        // Check for saved config
+        const savedConfig = firebaseConfig;
+        if (savedConfig) {
             try {
-                const result = await window.storage.get('dnd_player_view', true);
-                if (result) {
-                    const state = JSON.parse(result.value);
-                    
-                    if (state.mapData) {
+                initFirebase(JSON.parse(savedConfig));
+                document.getElementById('configModal').classList.add('hidden');
+            } catch (e) {
+                console.error('Invalid saved config:', e);
+            }
+        }
+
+        // Save config
+        document.getElementById('saveConfig').addEventListener('click', () => {
+            try {
+                const configText = document.getElementById('firebaseConfig').value;
+                const config = JSON.parse(configText);
+                localStorage.setItem('firebaseConfig', configText);
+                initFirebase(config);
+                document.getElementById('configModal').classList.add('hidden');
+            } catch (e) {
+                alert('Invalid JSON config. Please check your Firebase config.');
+            }
+        });
+
+        function initFirebase(config) {
+            try {
+                const app = initializeApp(config);
+                db = getDatabase(app);
+                statusEl.textContent = '⏳ Waiting for DM...';
+                statusEl.className = 'status waiting';
+                listenForUpdates();
+            } catch (e) {
+                statusEl.textContent = '✗ Connection failed';
+                statusEl.classList.add('error');
+                console.error('Firebase init error:', e);
+            }
+        }
+
+        function listenForUpdates() {
+            if (!db) return;
+            
+            const stateRef = ref(db, 'gameState');
+            onValue(stateRef, (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    if (data.mapData) {
                         const img = new Image();
                         img.onload = () => {
                             mapImage = img;
                             canvas.width = img.width;
                             canvas.height = img.height;
+                            // Filter to show only player tokens
+                            tokens = (data.tokens || []).filter(t => t.type === 'player');
                             renderMap();
-                            document.querySelector('.status').textContent = 'Connected';
+                            statusEl.textContent = '✓ Connected';
+                            statusEl.className = 'status';
                         };
-                        img.src = state.mapData;
+                        img.src = data.mapData;
+                    } else {
+                        tokens = (data.tokens || []).filter(t => t.type === 'player');
+                        renderMap();
                     }
-                    
-                    tokens = state.tokens || [];
-                    renderMap();
+                } else {
+                    statusEl.textContent = '⏳ Waiting for DM to upload map...';
+                    statusEl.className = 'status waiting';
                 }
-            } catch (e) {
-                console.log('Waiting for DM to share map...');
-            }
+            }, (error) => {
+                statusEl.textContent = '✗ Connection error';
+                statusEl.classList.add('error');
+                console.error('Firebase read error:', error);
+            });
         }
 
         function renderMap() {
@@ -110,10 +253,6 @@
                 ctx.fillText(token.name, token.x, token.y);
             });
         }
-
-        // Auto-refresh every 2 seconds
-        setInterval(loadPlayerView, 2000);
-        loadPlayerView();
     </script>
 </body>
 </html>
