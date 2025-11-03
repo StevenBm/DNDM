@@ -117,11 +117,19 @@
                             statusEl.textContent = '✓ Connected';
                             statusEl.className = 'status';
                         };
-                        // Add timestamp to force reload
-                        img.src = data.mapData + '?' + data.timestamp;
+                        img.onerror = () => {
+                            console.error('Failed to load map image');
+                            statusEl.textContent = '✗ Map load failed';
+                            statusEl.className = 'status error';
+                        };
+                        // Add cache buster to force reload
+                        const cacheBuster = data.timestamp || Date.now();
+                        img.src = data.mapData.includes('?') ? data.mapData : data.mapData + '?t=' + cacheBuster;
                     } else {
                         tokens = (data.tokens || []).filter(t => t.type === 'player');
-                        renderMap();
+                        if (mapImage) {
+                            renderMap();
+                        }
                     }
                 } else {
                     statusEl.textContent = '⏳ Waiting for DM to upload map...';
