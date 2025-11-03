@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D&D Player View</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            overflow: hidden;
+        }
+        #header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.8);
+            padding: 6px 12px;
+            z-index: 100;
+            text-align: center;
+            font-size: 12px;
+        }
+        #mapContainer {
+            position: fixed;
+            top: 30px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #mapCanvas {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+        }
+        .status {
+            color: #2a7fff;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <span class="status">Waiting for DM...</span>
+    </div>
+    <div id="mapContainer">
+        <canvas id="mapCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+        let mapImage = null;
+        let tokens = [];
+
+        async function loadPlayerView() {
+            try {
+                const result = await window.storage.get('dnd_player_view', true);
+                if (result) {
+                    const state = JSON.parse(result.value);
+                    
+                    if (state.mapData) {
+                        const img = new Image();
+                        img.onload = () => {
+                            mapImage = img;
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            renderMap();
+                            document.querySelector('.status').textContent = 'Connected';
+                        };
+                        img.src = state.mapData;
+                    }
+                    
+                    tokens = state.tokens || [];
+                    renderMap();
+                }
+            } catch (e) {
+                console.log('Waiting for DM to share map...');
+            }
+        }
+
+        function renderMap() {
+            if (!mapImage) return;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(mapImage, 0, 0);
+            
+            // Draw player tokens only
+            tokens.forEach(token => {
+                ctx.beginPath();
+                ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(42, 127, 255, 0.8)';
+                ctx.fill();
+                ctx.strokeStyle = '#2a7fff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(token.name, token.x, token.y);
+            });
+        }
+
+        // Auto-refresh every 2 seconds
+        setInterval(loadPlayerView, 2000);
+        loadPlayerView();
+    </script>
+</body>
+</html>

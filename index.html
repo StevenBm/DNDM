@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D&D Master View</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            overflow: hidden;
+        }
+        #controls {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.8);
+            padding: 8px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            z-index: 100;
+            flex-wrap: wrap;
+        }
+        button {
+            background: #4a4a4a;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        button:hover {
+            background: #5a5a5a;
+        }
+        button.active {
+            background: #2a7fff;
+        }
+        input[type="file"] {
+            font-size: 11px;
+            color: #fff;
+        }
+        input[type="text"] {
+            background: #2a2a2a;
+            border: 1px solid #4a4a4a;
+            color: #fff;
+            padding: 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            width: 120px;
+        }
+        #mapContainer {
+            position: fixed;
+            top: 45px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: auto;
+            background: #0a0a0a;
+        }
+        #mapCanvas {
+            position: relative;
+            margin: 20px auto;
+            display: block;
+            cursor: crosshair;
+        }
+        .token {
+            position: absolute;
+            border-radius: 50%;
+            border: 3px solid;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: move;
+            user-select: none;
+        }
+        .player {
+            background: rgba(42, 127, 255, 0.8);
+            border-color: #2a7fff;
+        }
+        .enemy {
+            background: rgba(255, 42, 42, 0.8);
+            border-color: #ff2a2a;
+        }
+        .label {
+            font-size: 11px;
+            color: #aaa;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="file" id="mapUpload" accept="image/*">
+        <button id="addPlayer">+ Player</button>
+        <button id="addEnemy">+ Enemy</button>
+        <input type="text" id="tokenName" placeholder="Token name">
+        <button id="clearAll">Clear All</button>
+        <button id="syncPlayers">Sync to Players</button>
+        <span class="label">Mode:</span>
+        <button id="modeSelect" class="active">Select</button>
+        <button id="modePlace">Place</button>
+    </div>
+    <div id="mapContainer">
+        <canvas id="mapCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+        let mapImage = null;
+        let tokens = [];
+        let selectedToken = null;
+        let dragOffset = { x: 0, y: 0 };
+        let mode = 'select';
+        let placeType = null;
+
+        // Load saved state
+        async function loadState() {
+            try {
+                const result = await window.storage.get('dnd_master_state', true);
+                if (result) {
+                    const state = JSON.parse(result.value);
+                    if (state.mapData) {
+                        const img = new Image();
+                        img.onload = () => {
+                            mapImage = img;
+                            resizeCanvas();
+                        };
+                        img.src = state.mapData;
+                    }
+                    tokens = state.tokens || [];
+                    renderTokens();
+                }
+            } catch (e) {
+                console.log('No saved state found');
+            }
+        }
+
+        // Save state
+        async function saveState() {
+            const state = {
+                mapData: mapImage ? canvas.toDataURL() : null,
+                tokens: tokens
+            };
+            try {
+                await window.storage.set('dnd_master_state', JSON.stringify(state), true);
+                await window.storage.set('dnd_player_view', JSON.stringify({
+                    mapData: state.mapData,
+                    tokens: tokens.filter(t => t.type === 'player')
+                }), true);
+            } catch (e) {
+                console.error('Save failed:', e);
+            }
+        }
+
+        // Map upload
+        document.getElementById('mapUpload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        mapImage = img;
+                        resizeCanvas();
+                        saveState();
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function resizeCanvas() {
+            if (!mapImage) return;
+            canvas.width = mapImage.width;
+            canvas.height = mapImage.height;
+            renderMap();
+        }
+
+        function renderMap() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (mapImage) {
+                ctx.drawImage(mapImage, 0, 0);
+            }
+            renderTokens();
+        }
+
+        function renderTokens() {
+            tokens.forEach(token => {
+                ctx.beginPath();
+                ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                ctx.fillStyle = token.type === 'player' ? 'rgba(42, 127, 255, 0.8)' : 'rgba(255, 42, 42, 0.8)';
+                ctx.fill();
+                ctx.strokeStyle = token.type === 'player' ? '#2a7fff' : '#ff2a2a';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(token.name, token.x, token.y);
+            });
+        }
+
+        // Mode switching
+        document.getElementById('modeSelect').addEventListener('click', () => {
+            mode = 'select';
+            placeType = null;
+            document.getElementById('modeSelect').classList.add('active');
+            document.getElementById('modePlace').classList.remove('active');
+        });
+
+        document.getElementById('modePlace').addEventListener('click', () => {
+            mode = 'place';
+            document.getElementById('modeSelect').classList.remove('active');
+            document.getElementById('modePlace').classList.add('active');
+        });
+
+        // Add tokens
+        document.getElementById('addPlayer').addEventListener('click', () => {
+            mode = 'place';
+            placeType = 'player';
+            document.getElementById('modePlace').classList.add('active');
+            document.getElementById('modeSelect').classList.remove('active');
+        });
+
+        document.getElementById('addEnemy').addEventListener('click', () => {
+            mode = 'place';
+            placeType = 'enemy';
+            document.getElementById('modePlace').classList.add('active');
+            document.getElementById('modeSelect').classList.remove('active');
+        });
+
+        // Canvas click
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (mode === 'place' && placeType) {
+                const name = document.getElementById('tokenName').value || 
+                    (placeType === 'player' ? 'P' : 'E') + (tokens.length + 1);
+                tokens.push({ x, y, type: placeType, name });
+                document.getElementById('tokenName').value = '';
+                renderMap();
+                saveState();
+                mode = 'select';
+                placeType = null;
+                document.getElementById('modeSelect').classList.add('active');
+                document.getElementById('modePlace').classList.remove('active');
+            } else if (mode === 'select') {
+                selectedToken = tokens.find(t => 
+                    Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+                );
+                if (selectedToken) {
+                    dragOffset = { x: x - selectedToken.x, y: y - selectedToken.y };
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (selectedToken && mode === 'select') {
+                const rect = canvas.getBoundingClientRect();
+                selectedToken.x = e.clientX - rect.left - dragOffset.x;
+                selectedToken.y = e.clientY - rect.top - dragOffset.y;
+                renderMap();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            if (selectedToken) {
+                saveState();
+            }
+            selectedToken = null;
+        });
+
+        // Clear all
+        document.getElementById('clearAll').addEventListener('click', () => {
+            if (confirm('Clear all tokens?')) {
+                tokens = [];
+                renderMap();
+                saveState();
+            }
+        });
+
+        // Sync
+        document.getElementById('syncPlayers').addEventListener('click', () => {
+            saveState();
+            alert('Synced! Players will see updated map and player tokens.');
+        });
+
+        // Delete token on right-click
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const index = tokens.findIndex(t => 
+                Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+            );
+            if (index !== -1) {
+                tokens.splice(index, 1);
+                renderMap();
+                saveState();
+            }
+        });
+
+        loadState();
+    </script>
+</body>
+</html>
