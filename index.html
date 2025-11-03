@@ -199,8 +199,7 @@
 
         // Save config
         document.getElementById('saveConfig').addEventListener('click', () => {
-				const configText = firebaseConfig;
-                const config = JSON.parse(configText);
+                const config = firebaseConfig;
                 localStorage.setItem('firebaseConfig', configText);
                 initFirebase(config);
                 document.getElementById('configModal').classList.add('hidden');
