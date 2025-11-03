@@ -117,7 +117,8 @@
                             statusEl.textContent = '✓ Connected';
                             statusEl.className = 'status';
                         };
-                        img.src = data.mapData;
+                        // Add timestamp to force reload
+                        img.src = data.mapData + '?' + data.timestamp;
                     } else {
                         tokens = (data.tokens || []).filter(t => t.type === 'player');
                         renderMap();
