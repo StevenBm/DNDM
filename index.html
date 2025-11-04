@@ -183,6 +183,7 @@
         <button id="modeMove" class="active">Move</button>
         <button id="modePlace">Place</button>
         <span class="status" id="status">🔄 Connecting...</span>
+		<button id="toggleFog" class="active">☁️ Fog: ON</button>
     </div>
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
@@ -205,6 +206,8 @@
         let placeType = null;
         let playerCount = 0;
         let enemyCount = 0;
+		let fogEnabled = true;
+		let visionRadius = 150; // radius around players visible to them
 
         // Firebase configuration
         const firebaseConfig = {
@@ -360,6 +363,9 @@
 
         function loadMapFromUrl(url) {
             const img = new Image();
+			fogEnabled = true;
+			document.getElementById('toggleFog').textContent = '☁️ Fog: ON';
+			document.getElementById('toggleFog').classList.add('active');
             img.onload = () => {
                 mapImage = img;
                 canvas.width = img.width;
@@ -417,11 +423,15 @@
             // Debounce saves to prevent conflicts
             saveTimeout = setTimeout(async () => {
                 const mapData = mapImage ? canvas.toDataURL('image/jpeg', 0.7) : null;
-                const state = {
-                    mapData: mapData,
-                    tokens: tokens,
-                    timestamp: Date.now()
-                };
+				const state = {
+					mapData: mapData,
+					tokens: tokens,
+					fog: {
+						enabled: fogEnabled,
+						radius: visionRadius
+					},
+					timestamp: Date.now()
+				};
                 
                 console.log('Saving state, map exists:', !!mapData, 'tokens:', tokens.length);
                 
@@ -517,7 +527,13 @@
             document.getElementById('modePlace').classList.add('active');
             document.getElementById('modeMove').classList.remove('active');
         });
-
+		document.getElementById('toggleFog').addEventListener('click', () => {
+			fogEnabled = !fogEnabled;
+			const btn = document.getElementById('toggleFog');
+			btn.textContent = fogEnabled ? '☁️ Fog: ON' : '🌤️ Fog: OFF';
+			btn.classList.toggle('active', fogEnabled);
+			saveState();
+		});
         // Canvas interactions
         canvas.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();

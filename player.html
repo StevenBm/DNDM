@@ -73,7 +73,7 @@
         let db = null;
         let mapImage = null;
         let tokens = [];
-
+		let currentFog = { enabled: true, radius: 150 };
         // Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
@@ -104,6 +104,9 @@
             const stateRef = ref(db, 'gameState');
             onValue(stateRef, (snapshot) => {
                 const data = snapshot.val();
+				if (data.fog) {
+					currentFog = data.fog;
+				}
                 if (data) {
                     if (data.mapData) {
                         const img = new Image();
@@ -148,28 +151,48 @@
             });
         }
 
-        function renderMap() {
-            if (!mapImage) return;
-            
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(mapImage, 0, 0);
-            
-            // Draw player tokens only
-            tokens.forEach(token => {
-                ctx.beginPath();
-                ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(42, 127, 255, 0.8)';
-                ctx.fill();
-                ctx.strokeStyle = '#2a7fff';
-                ctx.lineWidth = 3;
-                ctx.stroke();
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold 14px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(token.name, token.x, token.y);
-            });
-        }
+       function renderMap() {
+    if (!mapImage) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(mapImage, 0, 0);
+
+    // Get fog settings
+    const fog = currentFog || { enabled: false, radius: 150 };
+
+    // Draw player tokens (they’ll also define the vision zones)
+    tokens.forEach(token => {
+        ctx.beginPath();
+        ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(42, 127, 255, 0.8)';
+        ctx.fill();
+        ctx.strokeStyle = '#2a7fff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(token.name, token.x, token.y);
+    });
+
+    // --- Fog of War overlay ---
+    if (fog.enabled) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'; // mostly opaque fog
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Create circular vision zones
+        ctx.globalCompositeOperation = 'destination-out';
+        tokens.forEach(token => {
+            ctx.beginPath();
+            ctx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        ctx.restore();
+    }
+}
     </script>
 </body>
 </html>
