@@ -141,17 +141,25 @@
             left: 0;
             right: 0;
             bottom: 0;
-            overflow: auto;
+            overflow: hidden;
             background: #0a0a0a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         #mapCanvas {
-            position: relative;
-            margin: 20px auto;
             display: block;
             cursor: crosshair;
+            transform-origin: center center;
         }
         #mapCanvas.move-mode {
             cursor: move;
+        }
+        #mapCanvas.pan-mode {
+            cursor: grab;
+        }
+        #mapCanvas.pan-mode:active {
+            cursor: grabbing;
         }
         .label {
             font-size: 11px;
@@ -191,10 +199,11 @@
         <span class="label">Mode:</span>
         <button id="modeMove" class="active">Move</button>
         <button id="modePlace">Place</button>
+        <button id="resetZoom">Reset Zoom</button>
         <span class="status" id="status">🔄 Connecting...</span>
-		<button id="toggleFog" class="active">☁️ Fog: ON</button>
-		<label style="color:#fff;">Vision radius:</label>
-		<input type="range" id="visionSlider" min="50" max="400" value="150">
+        <button id="toggleFog" class="active">☁️ Fog: ON</button>
+        <label style="color:#fff;">Vision radius:</label>
+        <input type="range" id="visionSlider" min="50" max="400" value="150">
     </div>
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
@@ -220,13 +229,18 @@
         let playerCount = 0;
         let enemyCount = 0;
         let itemCount = 0;
-		let fogEnabled = true;
-		let visionRadius = 150;
+        let fogEnabled = true;
+        let visionRadius = 150;
         let tokenImages = {};
         let playerLibrary = {};
         let enemyLibrary = {};
         let itemLibrary = {};
         let isLocalUpdate = false;
+        let zoom = 1;
+        let panX = 0;
+        let panY = 0;
+        let isPanning = false;
+        let panStart = { x: 0, y: 0 };
 
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
@@ -293,15 +307,6 @@
                 }
             } catch (e) {
                 console.error('Failed to scan maps folder:', e);
-                mapLibrary = {
-                    "Story A": {
-                        "Town A": {
-                            "Town Square": "maps/story-a/town-a/townsquare.jpg",
-                            "Mayor House": "maps/story-a/town-a/mayorhouse.jpg"
-                        }
-                    }
-                };
-                buildMapDropdown();
             }
         }
 
@@ -355,13 +360,17 @@
 
         function loadMapFromUrl(url) {
             const img = new Image();
-			fogEnabled = true;
-			document.getElementById('toggleFog').textContent = '☁️ Fog: ON';
-			document.getElementById('toggleFog').classList.add('active');
+            fogEnabled = true;
+            document.getElementById('toggleFog').textContent = '☁️ Fog: ON';
+            document.getElementById('toggleFog').classList.add('active');
             img.onload = () => {
                 mapImage = img;
                 canvas.width = img.width;
                 canvas.height = img.height;
+                zoom = 1;
+                panX = 0;
+                panY = 0;
+                applyTransform();
                 renderMap();
                 saveState();
             };
@@ -425,17 +434,17 @@
             
             saveTimeout = setTimeout(async () => {
                 const mapData = mapImage ? canvas.toDataURL('image/jpeg', 0.7) : null;
-				const state = {
-					mapData: mapData,
-					tokens: tokens,
-					fog: {
-						enabled: fogEnabled,
-						radius: visionRadius
-					},
-					timestamp: Date.now()
-				};
-                
-                console.log('Saving state, map exists:', !!mapData, 'tokens:', tokens.length);
+                const state = {
+                    mapData: mapData,
+                    tokens: tokens,
+                    fog: {
+                        enabled: fogEnabled,
+                        radius: visionRadius
+                    },
+                    zoom: zoom,
+                    pan: { x: panX, y: panY },
+                    timestamp: Date.now()
+                };
                 
                 try {
                     await set(ref(db, 'gameState'), state);
@@ -461,6 +470,10 @@
                         mapImage = img;
                         canvas.width = img.width;
                         canvas.height = img.height;
+                        zoom = 1;
+                        panX = 0;
+                        panY = 0;
+                        applyTransform();
                         renderMap();
                         saveState();
                     };
@@ -469,6 +482,10 @@
                 reader.readAsDataURL(file);
             }
         });
+
+        function applyTransform() {
+            canvas.style.transform = `scale(${zoom}) translate(${panX}px, ${panY}px)`;
+        }
 
         function renderMap() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -669,6 +686,7 @@
             loadTokenImage(imagePath);
             
             canvas.classList.remove('move-mode');
+            canvas.classList.remove('pan-mode');
             document.getElementById('modePlace').classList.add('active');
             document.getElementById('modeMove').classList.remove('active');
         }
@@ -707,6 +725,7 @@
             mode = 'move';
             placeType = null;
             canvas.classList.remove('crosshair');
+            canvas.classList.remove('pan-mode');
             canvas.classList.add('move-mode');
             document.getElementById('modeMove').classList.add('active');
             document.getElementById('modePlace').classList.remove('active');
@@ -715,27 +734,53 @@
         document.getElementById('modePlace').addEventListener('click', () => {
             mode = 'place';
             canvas.classList.remove('move-mode');
+            canvas.classList.remove('pan-mode');
             document.getElementById('modeMove').classList.remove('active');
             document.getElementById('modePlace').classList.add('active');
         });
 
-		document.getElementById('visionSlider').addEventListener('input', (e) => {
-			visionRadius = parseInt(e.target.value);
-			saveState();
-		});
+        document.getElementById('visionSlider').addEventListener('input', (e) => {
+            visionRadius = parseInt(e.target.value);
+            saveState();
+        });
 
-		document.getElementById('toggleFog').addEventListener('click', () => {
-			fogEnabled = !fogEnabled;
-			const btn = document.getElementById('toggleFog');
-			btn.textContent = fogEnabled ? '☁️ Fog: ON' : '🌤️ Fog: OFF';
-			btn.classList.toggle('active', fogEnabled);
-			saveState();
-		});
+        document.getElementById('toggleFog').addEventListener('click', () => {
+            fogEnabled = !fogEnabled;
+            const btn = document.getElementById('toggleFog');
+            btn.textContent = fogEnabled ? '☁️ Fog: ON' : '🌤️ Fog: OFF';
+            btn.classList.toggle('active', fogEnabled);
+            saveState();
+        });
+
+        document.getElementById('resetZoom').addEventListener('click', () => {
+            zoom = 1;
+            panX = 0;
+            panY = 0;
+            applyTransform();
+            saveState();
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            zoom = Math.max(0.1, Math.min(5, zoom * delta));
+            applyTransform();
+            saveState();
+        });
 
         canvas.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+			const x = (e.clientX - rect.left) / zoom;
+			const y = (e.clientY - rect.top) / zoom;
+
+            if (e.shiftKey) {
+                isPanning = true;
+                canvas.classList.add('pan-mode');
+                panStart = { x: e.clientX / zoom, y: e.clientY / zoom };
+                return;
+            }
 
             if (mode === 'place' && placeType) {
                 let name;
@@ -780,15 +825,44 @@
         });
 
         canvas.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                const currentX = e.clientX / zoom;
+                const currentY = e.clientY / zoom;
+                panX += currentX - panStart.x;
+                panY += currentY - panStart.y;
+                panStart = { x: currentX, y: currentY };
+                applyTransform();
+                return;
+            }
+
             if (selectedToken && mode === 'move') {
                 const rect = canvas.getBoundingClientRect();
-                selectedToken.x = e.clientX - rect.left - dragOffset.x;
-                selectedToken.y = e.clientY - rect.top - dragOffset.y;
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                selectedToken.x = (e.clientX - rect.left) / zoom - dragOffset.x;
+				selectedToken.y = (e.clientY - rect.top) / zoom - dragOffset.y;
                 renderMap();
             }
         });
 
         canvas.addEventListener('mouseup', () => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.classList.remove('pan-mode');
+                saveState();
+            }
+            if (selectedToken) {
+                selectedToken = null;
+                saveState();
+            }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.classList.remove('pan-mode');
+                saveState();
+            }
             if (selectedToken) {
                 selectedToken = null;
                 saveState();
@@ -809,8 +883,10 @@
         canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+			const x = (e.clientX - rect.left) / zoom;
+			const y = (e.clientY - rect.top) / zoom;
             const index = tokens.findIndex(t => 
                 Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
             );

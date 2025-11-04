@@ -33,15 +33,14 @@
             left: 0;
             right: 0;
             bottom: 0;
-            overflow: auto;
+            overflow: hidden;
             display: flex;
             align-items: center;
             justify-content: center;
         }
         #mapCanvas {
             display: block;
-            max-width: 100%;
-            max-height: 100%;
+            transform-origin: center center;
         }
         .status {
             color: #2a7fff;
@@ -73,8 +72,12 @@
         let db = null;
         let mapImage = null;
         let tokens = [];
-		let currentFog = { enabled: true, radius: 150 };
-        // Firebase configuration
+        let currentFog = { enabled: true, radius: 150 };
+        let tokenImages = {};
+        let zoom = 1;
+        let panX = 0;
+        let panY = 0;
+
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
             authDomain: "dnd-mapshare.firebaseapp.com",
@@ -85,7 +88,6 @@
             appId: "1:624008039203:web:46ee20fd32f7d8f4f95a96"
         };
 
-        // Initialize Firebase
         try {
             const app = initializeApp(firebaseConfig);
             db = getDatabase(app);
@@ -98,15 +100,38 @@
             console.error('Firebase init error:', e);
         }
 
+        function loadTokenImage(imagePath) {
+            if (!tokenImages[imagePath]) {
+                const img = new Image();
+                img.onload = () => {
+                    tokenImages[imagePath] = img;
+                    renderMap();
+                };
+                img.onerror = () => {
+                    console.error('Failed to load token image:', imagePath);
+                };
+                img.src = imagePath;
+            }
+        }
+
         function listenForUpdates() {
             if (!db) return;
             
             const stateRef = ref(db, 'gameState');
             onValue(stateRef, (snapshot) => {
                 const data = snapshot.val();
-				if (data.fog) {
-					currentFog = data.fog;
-				}
+                if (data.fog) {
+                    currentFog = data.fog;
+                }
+                if (data.zoom !== undefined) {
+                    zoom = data.zoom;
+                    applyTransform();
+                }
+                if (data.pan) {
+                    panX = data.pan.x;
+                    panY = data.pan.y;
+                    applyTransform();
+                }
                 if (data) {
                     if (data.mapData) {
                         const img = new Image();
@@ -114,9 +139,16 @@
                             mapImage = img;
                             canvas.width = img.width;
                             canvas.height = img.height;
-                            // Filter to show only player tokens
                             tokens = (data.tokens || []).filter(t => t.type === 'player');
+                            
+                            tokens.forEach(token => {
+                                if (token.image && !tokenImages[token.image]) {
+                                    loadTokenImage(token.image);
+                                }
+                            });
+                            
                             renderMap();
+                            applyTransform();
                             statusEl.textContent = '✓ Connected';
                             statusEl.className = 'status';
                         };
@@ -125,17 +157,19 @@
                             statusEl.textContent = '✗ Map load failed';
                             statusEl.className = 'status error';
                         };
-                        // Add cache buster to force reload
                         const cacheBuster = data.timestamp || Date.now();
-					if (data.mapData.startsWith('data:image')) {
-						// Base64 image, use directly
-							img.src = data.mapData;
-					} else {
-						// Normal URL, add cache buster
-						img.src = data.mapData.includes('?') ? data.mapData : data.mapData + '?t=' + cacheBuster;
-					}
+                        if (data.mapData.startsWith('data:image')) {
+                            img.src = data.mapData;
+                        } else {
+                            img.src = data.mapData.includes('?') ? data.mapData : data.mapData + '?t=' + cacheBuster;
+                        }
                     } else {
                         tokens = (data.tokens || []).filter(t => t.type === 'player');
+                        tokens.forEach(token => {
+                            if (token.image && !tokenImages[token.image]) {
+                                loadTokenImage(token.image);
+                            }
+                        });
                         if (mapImage) {
                             renderMap();
                         }
@@ -151,63 +185,85 @@
             });
         }
 
-       function renderMap() {
-    if (!mapImage) return;
+        function applyTransform() {
+            canvas.style.transform = `scale(${zoom}) translate(${panX}px, ${panY}px)`;
+        }
 
-    // Draw the base map
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(mapImage, 0, 0);
+        function renderMap() {
+            if (!mapImage) return;
 
-    // Get fog settings from Firebase
-    const fog = currentFog || { enabled: false, radius: 150 };
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(mapImage, 0, 0);
 
-    // Draw tokens (so the player can see their marker under fog)
-    tokens.forEach(token => {
-        ctx.beginPath();
-        ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(42, 127, 255, 0.8)';
-        ctx.fill();
-        ctx.strokeStyle = '#2a7fff';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(token.name, token.x, token.y);
-    });
+            const fog = currentFog || { enabled: false, radius: 150 };
 
-    // 🟡 Draw fog overlay with visible vision circles
-   if (fog.enabled) {
-    const fogCanvas = document.createElement('canvas');
-    fogCanvas.width = canvas.width;
-    fogCanvas.height = canvas.height;
-    const fogCtx = fogCanvas.getContext('2d');
+            tokens.forEach(token => {
+                if (token.image && tokenImages[token.image]) {
+                    const img = tokenImages[token.image];
+                    ctx.save();
+                    
+                    ctx.beginPath();
+                    ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    ctx.closePath();
+                    ctx.clip();
+                    
+                    const size = 40;
+                    ctx.drawImage(img, token.x - 20, token.y - 20, size, size);
+                    
+                    ctx.restore();
+                    
+                    ctx.beginPath();
+                    ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#2a7fff';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(42, 127, 255, 0.8)';
+                    ctx.fill();
+                    ctx.strokeStyle = '#2a7fff';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 11px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 3;
+                ctx.strokeText(token.name, token.x, token.y + 23);
+                ctx.fillText(token.name, token.x, token.y + 23);
+            });
 
-    // Step 1: Fill fog fully dark
-    fogCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
-    fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
+            if (fog.enabled) {
+                const fogCanvas = document.createElement('canvas');
+                fogCanvas.width = canvas.width;
+                fogCanvas.height = canvas.height;
+                const fogCtx = fogCanvas.getContext('2d');
 
-    // Step 2: Smooth gradient vision zones
-    fogCtx.globalCompositeOperation = 'destination-out';
-    tokens.forEach(token => {
-        const gradient = fogCtx.createRadialGradient(
-            token.x, token.y, fog.radius * 0.5, // full clear inner circle
-            token.x, token.y, fog.radius // outer fade edge
-        );
-        gradient.addColorStop(0, 'rgba(0,0,0,1)');
-        gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                fogCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+                fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
 
-        fogCtx.fillStyle = gradient;
-        fogCtx.beginPath();
-        fogCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
-        fogCtx.fill();
-    });
+                fogCtx.globalCompositeOperation = 'destination-out';
+                tokens.forEach(token => {
+                    const gradient = fogCtx.createRadialGradient(
+                        token.x, token.y, fog.radius * 0.5,
+                        token.x, token.y, fog.radius
+                    );
+                    gradient.addColorStop(0, 'rgba(0,0,0,1)');
+                    gradient.addColorStop(1, 'rgba(0,0,0,0)');
 
-    ctx.drawImage(fogCanvas, 0, 0);
-}
-}
+                    fogCtx.fillStyle = gradient;
+                    fogCtx.beginPath();
+                    fogCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
+                    fogCtx.fill();
+                });
 
+                ctx.drawImage(fogCanvas, 0, 0);
+            }
+        }
     </script>
 </body>
 </html>
