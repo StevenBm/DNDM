@@ -178,28 +178,34 @@
     });
 
     // 🟡 Draw fog overlay with visible vision circles
-    if (fog.enabled) {
-        // Step 1: Create an offscreen mask
-        const fogCanvas = document.createElement('canvas');
-        fogCanvas.width = canvas.width;
-        fogCanvas.height = canvas.height;
-        const fogCtx = fogCanvas.getContext('2d');
+   if (fog.enabled) {
+    const fogCanvas = document.createElement('canvas');
+    fogCanvas.width = canvas.width;
+    fogCanvas.height = canvas.height;
+    const fogCtx = fogCanvas.getContext('2d');
 
-        // Step 2: Fill fog fully black
-        fogCtx.fillStyle = 'rgba(0, 0, 0, 0.92)';
-        fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
+    // Step 1: Fill fog fully dark
+    fogCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+    fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
 
-        // Step 3: Cut out vision circles
-        fogCtx.globalCompositeOperation = 'destination-out';
-        tokens.forEach(token => {
-            fogCtx.beginPath();
-            fogCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
-            fogCtx.fill();
-        });
+    // Step 2: Smooth gradient vision zones
+    fogCtx.globalCompositeOperation = 'destination-out';
+    tokens.forEach(token => {
+        const gradient = fogCtx.createRadialGradient(
+            token.x, token.y, fog.radius * 0.5, // full clear inner circle
+            token.x, token.y, fog.radius // outer fade edge
+        );
+        gradient.addColorStop(0, 'rgba(0,0,0,1)');
+        gradient.addColorStop(1, 'rgba(0,0,0,0)');
 
-        // Step 4: Draw the fog mask over the main map
-        ctx.drawImage(fogCanvas, 0, 0);
-    }
+        fogCtx.fillStyle = gradient;
+        fogCtx.beginPath();
+        fogCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
+        fogCtx.fill();
+    });
+
+    ctx.drawImage(fogCanvas, 0, 0);
+}
 }
 
     </script>

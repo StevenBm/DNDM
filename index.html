@@ -210,7 +210,6 @@
         let enemyCount = 0;
 		let fogEnabled = true;
 		let visionRadius = 150; // radius around players visible to them
-
         // Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
@@ -300,6 +299,7 @@
                 buildMapDropdown();
             }
         }
+		
 
         // Build dropdown from mapLibrary object
         function buildMapDropdown() {
@@ -362,6 +362,7 @@
         });
 
         scanMapsFolder();
+
 
         function loadMapFromUrl(url) {
             const img = new Image();
@@ -481,18 +482,29 @@
 
         function renderTokens() {
             tokens.forEach(token => {
-                ctx.beginPath();
-                ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
-                ctx.fillStyle = token.type === 'player' ? 'rgba(42, 127, 255, 0.8)' : 'rgba(255, 42, 42, 0.8)';
-                ctx.fill();
-                ctx.strokeStyle = token.type === 'player' ? '#2a7fff' : '#ff2a2a';
-                ctx.lineWidth = 3;
-                ctx.stroke();
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold 14px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(token.name, token.x, token.y);
+             const tokenImg = tokenImages[token.name]?.img;
+if (tokenImg && tokenImg.complete) {
+    const size = 40; // diameter
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(token.x, token.y, size / 2, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(tokenImg, token.x - size / 2, token.y - size / 2, size, size);
+    ctx.restore();
+    ctx.strokeStyle = token.type === 'player' ? '#2a7fff' : '#ff2a2a';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+} else {
+    // fallback to colored circle if image missing
+    ctx.beginPath();
+    ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+    ctx.fillStyle = token.type === 'player' ? 'rgba(42, 127, 255, 0.8)' : 'rgba(255, 42, 42, 0.8)';
+    ctx.fill();
+    ctx.strokeStyle = token.type === 'player' ? '#2a7fff' : '#ff2a2a';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+}
+
             });
         }
 
