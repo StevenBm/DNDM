@@ -184,6 +184,8 @@
         <button id="modePlace">Place</button>
         <span class="status" id="status">🔄 Connecting...</span>
 		<button id="toggleFog" class="active">☁️ Fog: ON</button>
+		<label style="color:#fff;">Vision radius:</label>
+		<input type="range" id="visionSlider" min="50" max="400" value="150">
     </div>
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
@@ -510,7 +512,10 @@
             document.getElementById('modeMove').classList.remove('active');
             document.getElementById('modePlace').classList.add('active');
         });
-
+		document.getElementById('visionSlider').addEventListener('input', (e) => {
+			visionRadius = parseInt(e.target.value);
+			saveState();
+		});
         // Add tokens
         document.getElementById('addPlayer').addEventListener('click', () => {
             mode = 'place';

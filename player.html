@@ -154,13 +154,14 @@
        function renderMap() {
     if (!mapImage) return;
 
+    // Draw the base map
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(mapImage, 0, 0);
 
-    // Get fog settings
+    // Get fog settings from Firebase
     const fog = currentFog || { enabled: false, radius: 150 };
 
-    // Draw player tokens (they’ll also define the vision zones)
+    // Draw tokens (so the player can see their marker under fog)
     tokens.forEach(token => {
         ctx.beginPath();
         ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
@@ -176,23 +177,31 @@
         ctx.fillText(token.name, token.x, token.y);
     });
 
-    // --- Fog of War overlay ---
+    // 🟡 Draw fog overlay with visible vision circles
     if (fog.enabled) {
-        ctx.save();
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'; // mostly opaque fog
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Step 1: Create an offscreen mask
+        const fogCanvas = document.createElement('canvas');
+        fogCanvas.width = canvas.width;
+        fogCanvas.height = canvas.height;
+        const fogCtx = fogCanvas.getContext('2d');
 
-        // Create circular vision zones
-        ctx.globalCompositeOperation = 'destination-out';
+        // Step 2: Fill fog fully black
+        fogCtx.fillStyle = 'rgba(0, 0, 0, 0.92)';
+        fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
+
+        // Step 3: Cut out vision circles
+        fogCtx.globalCompositeOperation = 'destination-out';
         tokens.forEach(token => {
-            ctx.beginPath();
-            ctx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
-            ctx.fill();
+            fogCtx.beginPath();
+            fogCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
+            fogCtx.fill();
         });
 
-        ctx.restore();
+        // Step 4: Draw the fog mask over the main map
+        ctx.drawImage(fogCanvas, 0, 0);
     }
 }
+
     </script>
 </body>
 </html>
