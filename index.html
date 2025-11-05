@@ -16,7 +16,7 @@
             color: #fff;
             overflow: hidden;
         }
-        #controls {
+              #controls {
             position: fixed;
             top: 0;
             left: 0;
@@ -28,6 +28,8 @@
             align-items: center;
             z-index: 100;
             flex-wrap: wrap;
+			white-space: nowrap;
+			overflow: visible;
         }
         button {
             background: #4a4a4a;
@@ -85,7 +87,7 @@
             max-height: 400px;
             overflow-y: auto;
             overflow-x: visible;
-            z-index: 1000;
+            z-index: 10000;
             margin-top: 2px;
         }
         .dropdown-menu.show {
@@ -121,7 +123,7 @@
             min-width: 200px;
             max-height: 400px;
             overflow-y: auto;
-            z-index: 1001;
+            z-index: 10001;
         }
         .dropdown-item.has-submenu:hover .submenu {
             display: block;
@@ -166,13 +168,26 @@
             color: #aaa;
             margin-left: 5px;
         }
-        .status {
-            color: #2a7fff;
-            font-size: 11px;
-        }
-        .error {
-            color: #ff2a2a;
-        }
+.status {
+    color: #2a7fff;
+    font-size: 11px;
+    min-width: 100px;        /* Fixed width to prevent shifting */
+    text-align: center;
+    flex-shrink: 0;          /* Prevents shrinking */
+    white-space: nowrap;     /* Prevents text wrapping */
+}
+
+.error {
+    color: #ff2a2a;
+}
+#selectionBox {
+    position: absolute;
+    border: 2px dashed #2a7fff;
+    background: rgba(42, 127, 255, 0.1);
+    pointer-events: none;
+    display: none;
+    transform-origin: top left;
+}
     </style>
 </head>
 <body>
@@ -212,11 +227,10 @@
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getDatabase, ref, set, onValue } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
-
+		let selectionBox = null;
         const canvas = document.getElementById('mapCanvas');
         const ctx = canvas.getContext('2d');
         const statusEl = document.getElementById('status');
-        
         let db = null;
         let mapImage = null;
         let tokens = [];
@@ -241,7 +255,11 @@
         let panY = 0;
         let isPanning = false;
         let panStart = { x: 0, y: 0 };
-
+		let selectedTokens = [];
+		
+		let isSelecting = false;
+		let selectionStart = { x: 0, y: 0 };
+		let selectionEnd = { x: 0, y: 0 }; // ADD THIS LINE
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
             authDomain: "dnd-mapshare.firebaseapp.com",
@@ -483,17 +501,41 @@
             }
         });
 
-        function applyTransform() {
-            canvas.style.transform = `scale(${zoom}) translate(${panX}px, ${panY}px)`;
-        }
 
-        function renderMap() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (mapImage) {
-                ctx.drawImage(mapImage, 0, 0);
-            }
-            renderTokens();
+function applyTransform() {
+    canvas.style.transformOrigin = "0 0";
+    canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+}
+
+   function renderMap() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (mapImage) {
+            ctx.drawImage(mapImage, 0, 0);
         }
+        renderTokens();
+        
+        // Draw selection box if active
+        if (isSelecting && selectionStart.x !== undefined) {
+            ctx.strokeStyle = '#2a7fff';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.fillStyle = 'rgba(42, 127, 255, 0.1)';
+            
+            const x1 = selectionStart.x;
+            const y1 = selectionStart.y;
+            const x2 = selectionEnd.x;
+            const y2 = selectionEnd.y;
+            
+            const x = Math.min(x1, x2);
+            const y = Math.min(y1, y2);
+            const width = Math.abs(x2 - x1);
+            const height = Math.abs(y2 - y1);
+            
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeRect(x, y, width, height);
+            ctx.setLineDash([]);
+        }
+    }
 
         function renderTokens() {
             tokens.forEach(token => {
@@ -549,6 +591,15 @@
                 ctx.strokeText(token.name, token.x, token.y + 23);
                 ctx.fillText(token.name, token.x, token.y + 23);
             });
+			selectedTokens.forEach(token => {
+    ctx.beginPath();
+    ctx.arc(token.x, token.y, 25, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ffff00';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+});
         }
 
         function loadTokenImage(imagePath) {
@@ -676,7 +727,22 @@
             
             createMenuItems(library, menu);
         }
+function screenToCanvas(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: (screenX - rect.left) / zoom,
+        y: (screenY - rect.top) / zoom
+    };
+}
 
+    // Helper function to convert canvas coordinates to screen coordinates
+ function canvasToScreen(canvasX, canvasY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: canvasX * zoom + rect.left,
+        y: canvasY * zoom + rect.top
+    };
+}
         function placeTokenFromLibrary(type, defaultName, imagePath) {
             mode = 'place';
             placeType = type;
@@ -729,6 +795,8 @@
             canvas.classList.add('move-mode');
             document.getElementById('modeMove').classList.add('active');
             document.getElementById('modePlace').classList.remove('active');
+			selectedTokens = [];
+			renderMap();
         });
 
         document.getElementById('modePlace').addEventListener('click', () => {
@@ -737,6 +805,8 @@
             canvas.classList.remove('pan-mode');
             document.getElementById('modeMove').classList.remove('active');
             document.getElementById('modePlace').classList.add('active');
+			selectedTokens = [];
+renderMap();
         });
 
         document.getElementById('visionSlider').addEventListener('input', (e) => {
@@ -752,111 +822,180 @@
             saveState();
         });
 
-        document.getElementById('resetZoom').addEventListener('click', () => {
-            zoom = 1;
-            panX = 0;
-            panY = 0;
-            applyTransform();
-            saveState();
-        });
+    document.getElementById('resetZoom').addEventListener('click', () => {
+        zoom = 1;
+        panX = 0;
+        panY = 0;
+        applyTransform();
+        saveState();
+    });
 
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            zoom = Math.max(0.1, Math.min(5, zoom * delta));
-            applyTransform();
-            saveState();
-        });
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-        canvas.addEventListener('mousedown', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-			const x = (e.clientX - rect.left) / zoom;
-			const y = (e.clientY - rect.top) / zoom;
+    // Get the canvas point under the mouse BEFORE zoom
+    const canvasX = (mouseX - panX) / zoom;
+    const canvasY = (mouseY - panY) / zoom;
 
-            if (e.shiftKey) {
-                isPanning = true;
-                canvas.classList.add('pan-mode');
-                panStart = { x: e.clientX / zoom, y: e.clientY / zoom };
-                return;
-            }
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const newZoom = Math.max(0.1, Math.min(5, zoom * delta));
 
-            if (mode === 'place' && placeType) {
-                let name;
-                if (placeTokenName) {
-                    name = placeTokenName;
+    // Calculate new pan so that canvasX/Y stays under the mouse
+    panX = mouseX - canvasX * newZoom;
+    panY = mouseY - canvasY * newZoom;
+
+    zoom = newZoom;
+    applyTransform();
+    saveState();
+});
+canvas.addEventListener('mousedown', (e) => {
+    const pos = screenToCanvas(e.clientX, e.clientY);
+    const x = pos.x;
+    const y = pos.y;
+    
+    if (e.shiftKey) {
+        isPanning = true;
+        canvas.classList.add('pan-mode');
+        panStart = { x: e.clientX, y: e.clientY };
+        return;
+    }
+    
+    if (mode === 'place' && placeType) {
+        let name;
+        const customName = document.getElementById('tokenName').value;
+        
+        if (customName) {
+            name = customName;
+        } else if (placeTokenName) {
+            // Use the library token name for subsequent placements
+            name = placeTokenName;
+        } else {
+            if (placeType === 'player') name = 'P' + (++playerCount);
+            else if (placeType === 'enemy') name = 'E' + (++enemyCount);
+            else if (placeType === 'item') name = 'I' + (++itemCount);
+        }
+        
+        const newToken = { 
+            x, 
+            y, 
+            type: placeType, 
+            name: name
+        };
+        
+        if (placeTokenImage) {
+            newToken.image = placeTokenImage;
+        }
+        
+        tokens.push(newToken);
+        
+        // Only clear the custom name input, keep placeTokenName and placeTokenImage
+        document.getElementById('tokenName').value = '';
+        
+        renderMap();
+        saveState();
+    } else if (mode === 'move') {
+            const clickedToken = tokens.find(t => 
+                Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+            );
+            
+            if (clickedToken && (e.ctrlKey || e.metaKey)) {
+                // Add/remove token from selection with Ctrl/Cmd click
+                const index = selectedTokens.indexOf(clickedToken);
+                if (index === -1) {
+                    selectedTokens.push(clickedToken);
                 } else {
-                    if (placeType === 'player') name = 'P' + (++playerCount);
-                    else if (placeType === 'enemy') name = 'E' + (++enemyCount);
-                    else if (placeType === 'item') name = 'I' + (++itemCount);
+                    selectedTokens.splice(index, 1);
                 }
-                
-                const newToken = { 
-                    x, 
-                    y, 
-                    type: placeType, 
-                    name: name
-                };
-                
-                if (placeTokenImage) {
-                    newToken.image = placeTokenImage;
-                }
-                
-                tokens.push(newToken);
-                document.getElementById('tokenName').value = '';
-                placeTokenName = null;
-                placeTokenImage = null;
                 renderMap();
-                saveState();
-                mode = 'move';
-                placeType = null;
-                canvas.classList.add('move-mode');
-                document.getElementById('modeMove').classList.add('active');
-                document.getElementById('modePlace').classList.remove('active');
-            } else if (mode === 'move') {
-                selectedToken = tokens.find(t => 
-                    Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-                );
-                if (selectedToken) {
-                    dragOffset = { x: x - selectedToken.x, y: y - selectedToken.y };
-                }
-            }
-        });
-
-        canvas.addEventListener('mousemove', (e) => {
-            if (isPanning) {
-                const currentX = e.clientX / zoom;
-                const currentY = e.clientY / zoom;
-                panX += currentX - panStart.x;
-                panY += currentY - panStart.y;
-                panStart = { x: currentX, y: currentY };
-                applyTransform();
-                return;
-            }
-
-            if (selectedToken && mode === 'move') {
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                selectedToken.x = (e.clientX - rect.left) / zoom - dragOffset.x;
-				selectedToken.y = (e.clientY - rect.top) / zoom - dragOffset.y;
+            } else if (clickedToken && selectedTokens.includes(clickedToken)) {
+                // Set drag offset for all selected tokens
+                selectedTokens.forEach(t => {
+                    t.dragOffset = { x: x - t.x, y: y - t.y };
+                });
+            } else if (clickedToken) {
+                // Single token selection
+                selectedTokens = [clickedToken];
+                clickedToken.dragOffset = { x: x - clickedToken.x, y: y - clickedToken.y };
+                renderMap();
+            } else {
+                // Start selection box
+                selectedTokens = [];
+                isSelecting = true;
+                selectionStart = { x: x, y: y };
+                selectionEnd = { x: x, y: y };
                 renderMap();
             }
-        });
+        }
+    });
 
-        canvas.addEventListener('mouseup', () => {
-            if (isPanning) {
-                isPanning = false;
-                canvas.classList.remove('pan-mode');
-                saveState();
-            }
-            if (selectedToken) {
-                selectedToken = null;
-                saveState();
-            }
-        });
+    // Fixed mousemove event
+    canvas.addEventListener('mousemove', (e) => {
+        if (isPanning) {
+            const dx = (e.clientX - panStart.x);
+            const dy = (e.clientY - panStart.y);
+            panX += dx;
+            panY += dy;
+            panStart = { x: e.clientX, y: e.clientY };
+            applyTransform();
+            return;
+        }
 
+        if (isSelecting) {
+            const pos = screenToCanvas(e.clientX, e.clientY);
+            selectionEnd.x = pos.x;
+            selectionEnd.y = pos.y;
+            renderMap();
+            return;
+        }
+
+        if (selectedTokens.length > 0 && mode === 'move') {
+            const pos = screenToCanvas(e.clientX, e.clientY);
+            const x = pos.x;
+            const y = pos.y;
+            
+            selectedTokens.forEach(token => {
+                if (token.dragOffset) {
+                    token.x = x - token.dragOffset.x;
+                    token.y = y - token.dragOffset.y;
+                }
+            });
+            renderMap();
+        }
+    });
+
+    // Fixed mouseup event
+    canvas.addEventListener('mouseup', (e) => {
+        if (isPanning) {
+            isPanning = false;
+            canvas.classList.remove('pan-mode');
+            saveState();
+        }
+        
+        if (isSelecting) {
+            isSelecting = false;
+            
+            const x1 = selectionStart.x;
+            const y1 = selectionStart.y;
+            const x2 = selectionEnd.x;
+            const y2 = selectionEnd.y;
+            
+            selectedTokens = tokens.filter(t => 
+                t.x >= Math.min(x1, x2) && t.x <= Math.max(x1, x2) &&
+                t.y >= Math.min(y1, y2) && t.y <= Math.max(y1, y2)
+            );
+            
+            renderMap();
+        }
+        
+        if (selectedTokens.length > 0 && !isSelecting) {
+            selectedTokens.forEach(t => delete t.dragOffset);
+            saveState();
+        }
+    });
         canvas.addEventListener('mouseleave', () => {
             if (isPanning) {
                 isPanning = false;
@@ -880,23 +1019,29 @@
             }
         });
 
-        canvas.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-			const x = (e.clientX - rect.left) / zoom;
-			const y = (e.clientY - rect.top) / zoom;
-            const index = tokens.findIndex(t => 
-                Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-            );
-            if (index !== -1) {
-                tokens.splice(index, 1);
-                renderMap();
-                saveState();
-            }
-        });
-
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const pos = screenToCanvas(e.clientX, e.clientY);
+    const x = pos.x;
+    const y = pos.y;
+    
+    const index = tokens.findIndex(t => 
+        Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+    );
+    if (index !== -1) {
+        const deletedToken = tokens[index];
+        tokens.splice(index, 1);
+        
+        // Remove from selectedTokens if it was selected
+        const selectedIndex = selectedTokens.indexOf(deletedToken);
+        if (selectedIndex !== -1) {
+            selectedTokens.splice(selectedIndex, 1);
+        }
+        
+        renderMap();
+        saveState();
+    }
+});
         canvas.classList.add('move-mode');
     </script>
 </body>
