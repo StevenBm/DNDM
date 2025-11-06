@@ -398,7 +398,7 @@
             img.src = url;
         }
 
-   function loadState() {
+ function loadState() {
     if (!db) return;
     const stateRef = ref(db, 'gameState');
     onValue(stateRef, (snapshot) => {
@@ -420,15 +420,17 @@
                 img.src = data.mapData;
             }
             
-            // Only update zoom/pan if not actively zooming or panning
-            if (!zoomSaveTimeout && !isPanning && data.zoom !== undefined && data.pan) {
-                zoom = data.zoom;
-                panX = data.pan.x;
-                panY = data.pan.y;
-                applyTransform();
+            // Only update zoom/pan when idle
+            if (!zoomSaveTimeout && !isPanning && !isSelecting && selectedTokens.length === 0) {
+                if (data.zoom !== undefined && data.pan) {
+                    zoom = data.zoom;
+                    panX = data.pan.x;
+                    panY = data.pan.y;
+                    applyTransform();
+                }
             }
             
-            if (!selectedToken && data.tokens) {
+            if (data.tokens) {
                 tokens = data.tokens;
                 playerCount = tokens.filter(t => t.type === 'player').length;
                 enemyCount = tokens.filter(t => t.type === 'enemy').length;
@@ -512,12 +514,12 @@
 
 
 let zoomSaveTimeout = null;
+let isPanningWithMouse = false; // Separate from shift-pan
 
 function applyTransform() {
     canvas.style.transformOrigin = "0 0";
     canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
 }
-
 
    function renderMap() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -846,26 +848,30 @@ renderMap();
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     
-    // CRITICAL: Get rect BEFORE any transform changes
+    // Get mouse position in VIEWPORT coordinates (relative to canvas element)
     const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    // Calculate which point on the canvas (in canvas pixels) is under the mouse
-    const canvasPointX = (mouseX - panX) / zoom;
-    const canvasPointY = (mouseY - panY) / zoom;
-
-    // Calculate new zoom
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    zoom = Math.max(0.1, Math.min(5, zoom * delta));
-
-    // Calculate new pan to keep canvas point under mouse
-    panX = mouseX - canvasPointX * zoom;
-    panY = mouseY - canvasPointY * zoom;
-
+    const viewportX = e.clientX - rect.left;
+    const viewportY = e.clientY - rect.top;
+    
+    // Convert viewport coords to canvas coords using CURRENT transform
+    // Formula: canvasCoord = (viewportCoord - pan) / zoom
+    const canvasX = (viewportX - panX) / zoom;
+    const canvasY = (viewportY - panY) / zoom;
+    
+    // Zoom
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    const oldZoom = zoom;
+    zoom = Math.max(0.1, Math.min(5, zoom * zoomFactor));
+    
+    // Now reposition so that canvasX,canvasY is still under the mouse
+    // We want: viewportX = panX + canvasX * zoom
+    // Solving: panX = viewportX - canvasX * zoom
+    panX = viewportX - canvasX * zoom;
+    panY = viewportY - canvasY * zoom;
+    
     applyTransform();
     
-    // Debounce save
+    // Debounced save
     clearTimeout(zoomSaveTimeout);
     zoomSaveTimeout = setTimeout(() => {
         saveState();
@@ -873,13 +879,22 @@ canvas.addEventListener('wheel', (e) => {
     }, 200);
 });
 canvas.addEventListener('mousedown', (e) => {
-    if (e.shiftKey) {
+    // Prevent middle-click scroll behavior
+    if (e.button === 1) {
+        e.preventDefault();
+    }
+    
+    // Middle mouse button or Shift+Left click for panning
+    if (e.button === 1 || (e.shiftKey && e.button === 0)) {
         isPanning = true;
         canvas.classList.add('pan-mode');
         panStart = { x: e.clientX, y: e.clientY };
         e.preventDefault();
         return;
     }
+    
+    // Only handle left click from here on
+    if (e.button !== 0 || e.shiftKey) return;
     
     const pos = screenToCanvas(e.clientX, e.clientY);
     const x = pos.x;
@@ -921,6 +936,7 @@ canvas.addEventListener('mousedown', (e) => {
         );
         
         if (clickedToken && (e.ctrlKey || e.metaKey)) {
+            // Ctrl+click: toggle selection
             const index = selectedTokens.indexOf(clickedToken);
             if (index === -1) {
                 selectedTokens.push(clickedToken);
@@ -929,14 +945,17 @@ canvas.addEventListener('mousedown', (e) => {
             }
             renderMap();
         } else if (clickedToken && selectedTokens.includes(clickedToken)) {
+            // Clicked on already selected token: start dragging all selected
             selectedTokens.forEach(t => {
                 t.dragOffset = { x: x - t.x, y: y - t.y };
             });
         } else if (clickedToken) {
+            // Clicked on unselected token: select only this one
             selectedTokens = [clickedToken];
             clickedToken.dragOffset = { x: x - clickedToken.x, y: y - clickedToken.y };
             renderMap();
         } else {
+            // Clicked on empty space: start selection box
             selectedTokens = [];
             isSelecting = true;
             selectionStart = { x: x, y: y };
@@ -947,7 +966,7 @@ canvas.addEventListener('mousedown', (e) => {
 });
 canvas.addEventListener('mousemove', (e) => {
     if (isPanning) {
-        // Pan in screen space - this is simple delta movement
+        // Simple screen-space delta
         const dx = e.clientX - panStart.x;
         const dy = e.clientY - panStart.y;
         panX += dx;
@@ -985,6 +1004,7 @@ canvas.addEventListener('mouseup', (e) => {
         isPanning = false;
         canvas.classList.remove('pan-mode');
         saveState();
+        return;
     }
     
     if (isSelecting) {
@@ -1001,47 +1021,63 @@ canvas.addEventListener('mouseup', (e) => {
         );
         
         renderMap();
+        return;
     }
     
-    if (selectedTokens.length > 0 && !isSelecting) {
+    if (selectedTokens.length > 0) {
         selectedTokens.forEach(t => delete t.dragOffset);
         saveState();
     }
 });
-        document.getElementById('clearTokens').addEventListener('click', () => {
-            if (confirm('Clear all tokens?')) {
-                tokens = [];
-                playerCount = 0;
-                enemyCount = 0;
-                itemCount = 0;
-                renderMap();
-                saveState();
-            }
-        });
-
+canvas.addEventListener('mouseleave', () => {
+    if (isPanning) {
+        isPanning = false;
+        canvas.classList.remove('pan-mode');
+        saveState();
+    }
+    if (selectedTokens.length > 0) {
+        selectedTokens.forEach(t => delete t.dragOffset);
+        saveState();
+    }
+});
 canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const pos = screenToCanvas(e.clientX, e.clientY);
     const x = pos.x;
     const y = pos.y;
     
-    const index = tokens.findIndex(t => 
+    // Check if we clicked on any selected token
+    const clickedSelectedToken = selectedTokens.find(t => 
         Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
     );
-    if (index !== -1) {
-        const deletedToken = tokens[index];
-        tokens.splice(index, 1);
-        
-        // Remove from selectedTokens if it was selected
-        const selectedIndex = selectedTokens.indexOf(deletedToken);
-        if (selectedIndex !== -1) {
-            selectedTokens.splice(selectedIndex, 1);
-        }
-        
+    
+    if (clickedSelectedToken && selectedTokens.length > 1) {
+        // Delete all selected tokens
+        tokens = tokens.filter(t => !selectedTokens.includes(t));
+        selectedTokens = [];
         renderMap();
         saveState();
+    } else {
+        // Delete single token under cursor
+        const index = tokens.findIndex(t => 
+            Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+        );
+        if (index !== -1) {
+            const deletedToken = tokens[index];
+            tokens.splice(index, 1);
+            
+            // Remove from selectedTokens if it was selected
+            const selectedIndex = selectedTokens.indexOf(deletedToken);
+            if (selectedIndex !== -1) {
+                selectedTokens.splice(selectedIndex, 1);
+            }
+            
+            renderMap();
+            saveState();
+        }
     }
 });
+
         canvas.classList.add('move-mode');
     </script>
 </body>
