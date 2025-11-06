@@ -398,46 +398,55 @@
             img.src = url;
         }
 
-        function loadState() {
-            if (!db) return;
-            const stateRef = ref(db, 'gameState');
-            onValue(stateRef, (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    if (isLocalUpdate) {
-                        isLocalUpdate = false;
-                        return;
+   function loadState() {
+    if (!db) return;
+    const stateRef = ref(db, 'gameState');
+    onValue(stateRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            if (isLocalUpdate) {
+                isLocalUpdate = false;
+                return;
+            }
+            
+            if (data.mapData && (!mapImage || canvas.toDataURL('image/jpeg', 0.7) !== data.mapData)) {
+                const img = new Image();
+                img.onload = () => {
+                    mapImage = img;
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    renderMap();
+                };
+                img.src = data.mapData;
+            }
+            
+            // Only update zoom/pan if not actively zooming or panning
+            if (!zoomSaveTimeout && !isPanning && data.zoom !== undefined && data.pan) {
+                zoom = data.zoom;
+                panX = data.pan.x;
+                panY = data.pan.y;
+                applyTransform();
+            }
+            
+            if (!selectedToken && data.tokens) {
+                tokens = data.tokens;
+                playerCount = tokens.filter(t => t.type === 'player').length;
+                enemyCount = tokens.filter(t => t.type === 'enemy').length;
+                itemCount = tokens.filter(t => t.type === 'item').length;
+                
+                tokens.forEach(token => {
+                    if (token.image && !tokenImages[token.image]) {
+                        loadTokenImage(token.image);
                     }
-                    
-                    if (data.mapData && (!mapImage || canvas.toDataURL('image/jpeg', 0.7) !== data.mapData)) {
-                        const img = new Image();
-                        img.onload = () => {
-                            mapImage = img;
-                            canvas.width = img.width;
-                            canvas.height = img.height;
-                            renderMap();
-                        };
-                        img.src = data.mapData;
-                    }
-                    if (!selectedToken && data.tokens) {
-                        tokens = data.tokens;
-                        playerCount = tokens.filter(t => t.type === 'player').length;
-                        enemyCount = tokens.filter(t => t.type === 'enemy').length;
-                        itemCount = tokens.filter(t => t.type === 'item').length;
-                        
-                        tokens.forEach(token => {
-                            if (token.image && !tokenImages[token.image]) {
-                                loadTokenImage(token.image);
-                            }
-                        });
-                        
-                        if (mapImage) {
-                            renderMap();
-                        }
-                    }
+                });
+                
+                if (mapImage) {
+                    renderMap();
                 }
-            });
+            }
         }
+    });
+}
 
         let saveTimeout = null;
 
@@ -502,10 +511,13 @@
         });
 
 
+let zoomSaveTimeout = null;
+
 function applyTransform() {
     canvas.style.transformOrigin = "0 0";
     canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
 }
+
 
    function renderMap() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -830,39 +842,48 @@ renderMap();
         saveState();
     });
 
+
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     
+    // CRITICAL: Get rect BEFORE any transform changes
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Get the canvas point under the mouse BEFORE zoom
-    const canvasX = (mouseX - panX) / zoom;
-    const canvasY = (mouseY - panY) / zoom;
+    // Calculate which point on the canvas (in canvas pixels) is under the mouse
+    const canvasPointX = (mouseX - panX) / zoom;
+    const canvasPointY = (mouseY - panY) / zoom;
 
+    // Calculate new zoom
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    const newZoom = Math.max(0.1, Math.min(5, zoom * delta));
+    zoom = Math.max(0.1, Math.min(5, zoom * delta));
 
-    // Calculate new pan so that canvasX/Y stays under the mouse
-    panX = mouseX - canvasX * newZoom;
-    panY = mouseY - canvasY * newZoom;
+    // Calculate new pan to keep canvas point under mouse
+    panX = mouseX - canvasPointX * zoom;
+    panY = mouseY - canvasPointY * zoom;
 
-    zoom = newZoom;
     applyTransform();
-    saveState();
+    
+    // Debounce save
+    clearTimeout(zoomSaveTimeout);
+    zoomSaveTimeout = setTimeout(() => {
+        saveState();
+        zoomSaveTimeout = null;
+    }, 200);
 });
 canvas.addEventListener('mousedown', (e) => {
-    const pos = screenToCanvas(e.clientX, e.clientY);
-    const x = pos.x;
-    const y = pos.y;
-    
     if (e.shiftKey) {
         isPanning = true;
         canvas.classList.add('pan-mode');
         panStart = { x: e.clientX, y: e.clientY };
+        e.preventDefault();
         return;
     }
+    
+    const pos = screenToCanvas(e.clientX, e.clientY);
+    const x = pos.x;
+    const y = pos.y;
     
     if (mode === 'place' && placeType) {
         let name;
@@ -871,7 +892,6 @@ canvas.addEventListener('mousedown', (e) => {
         if (customName) {
             name = customName;
         } else if (placeTokenName) {
-            // Use the library token name for subsequent placements
             name = placeTokenName;
         } else {
             if (placeType === 'player') name = 'P' + (++playerCount);
@@ -891,123 +911,103 @@ canvas.addEventListener('mousedown', (e) => {
         }
         
         tokens.push(newToken);
-        
-        // Only clear the custom name input, keep placeTokenName and placeTokenImage
         document.getElementById('tokenName').value = '';
         
         renderMap();
         saveState();
     } else if (mode === 'move') {
-            const clickedToken = tokens.find(t => 
-                Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-            );
-            
-            if (clickedToken && (e.ctrlKey || e.metaKey)) {
-                // Add/remove token from selection with Ctrl/Cmd click
-                const index = selectedTokens.indexOf(clickedToken);
-                if (index === -1) {
-                    selectedTokens.push(clickedToken);
-                } else {
-                    selectedTokens.splice(index, 1);
-                }
-                renderMap();
-            } else if (clickedToken && selectedTokens.includes(clickedToken)) {
-                // Set drag offset for all selected tokens
-                selectedTokens.forEach(t => {
-                    t.dragOffset = { x: x - t.x, y: y - t.y };
-                });
-            } else if (clickedToken) {
-                // Single token selection
-                selectedTokens = [clickedToken];
-                clickedToken.dragOffset = { x: x - clickedToken.x, y: y - clickedToken.y };
-                renderMap();
+        const clickedToken = tokens.find(t => 
+            Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+        );
+        
+        if (clickedToken && (e.ctrlKey || e.metaKey)) {
+            const index = selectedTokens.indexOf(clickedToken);
+            if (index === -1) {
+                selectedTokens.push(clickedToken);
             } else {
-                // Start selection box
-                selectedTokens = [];
-                isSelecting = true;
-                selectionStart = { x: x, y: y };
-                selectionEnd = { x: x, y: y };
-                renderMap();
+                selectedTokens.splice(index, 1);
             }
-        }
-    });
-
-    // Fixed mousemove event
-    canvas.addEventListener('mousemove', (e) => {
-        if (isPanning) {
-            const dx = (e.clientX - panStart.x);
-            const dy = (e.clientY - panStart.y);
-            panX += dx;
-            panY += dy;
-            panStart = { x: e.clientX, y: e.clientY };
-            applyTransform();
-            return;
-        }
-
-        if (isSelecting) {
-            const pos = screenToCanvas(e.clientX, e.clientY);
-            selectionEnd.x = pos.x;
-            selectionEnd.y = pos.y;
             renderMap();
-            return;
-        }
-
-        if (selectedTokens.length > 0 && mode === 'move') {
-            const pos = screenToCanvas(e.clientX, e.clientY);
-            const x = pos.x;
-            const y = pos.y;
-            
-            selectedTokens.forEach(token => {
-                if (token.dragOffset) {
-                    token.x = x - token.dragOffset.x;
-                    token.y = y - token.dragOffset.y;
-                }
+        } else if (clickedToken && selectedTokens.includes(clickedToken)) {
+            selectedTokens.forEach(t => {
+                t.dragOffset = { x: x - t.x, y: y - t.y };
             });
+        } else if (clickedToken) {
+            selectedTokens = [clickedToken];
+            clickedToken.dragOffset = { x: x - clickedToken.x, y: y - clickedToken.y };
+            renderMap();
+        } else {
+            selectedTokens = [];
+            isSelecting = true;
+            selectionStart = { x: x, y: y };
+            selectionEnd = { x: x, y: y };
             renderMap();
         }
-    });
+    }
+});
+canvas.addEventListener('mousemove', (e) => {
+    if (isPanning) {
+        // Pan in screen space - this is simple delta movement
+        const dx = e.clientX - panStart.x;
+        const dy = e.clientY - panStart.y;
+        panX += dx;
+        panY += dy;
+        panStart = { x: e.clientX, y: e.clientY };
+        applyTransform();
+        return;
+    }
 
-    // Fixed mouseup event
-    canvas.addEventListener('mouseup', (e) => {
-        if (isPanning) {
-            isPanning = false;
-            canvas.classList.remove('pan-mode');
-            saveState();
-        }
+    if (isSelecting) {
+        const pos = screenToCanvas(e.clientX, e.clientY);
+        selectionEnd.x = pos.x;
+        selectionEnd.y = pos.y;
+        renderMap();
+        return;
+    }
+
+    if (selectedTokens.length > 0 && mode === 'move') {
+        const pos = screenToCanvas(e.clientX, e.clientY);
+        const x = pos.x;
+        const y = pos.y;
         
-        if (isSelecting) {
-            isSelecting = false;
-            
-            const x1 = selectionStart.x;
-            const y1 = selectionStart.y;
-            const x2 = selectionEnd.x;
-            const y2 = selectionEnd.y;
-            
-            selectedTokens = tokens.filter(t => 
-                t.x >= Math.min(x1, x2) && t.x <= Math.max(x1, x2) &&
-                t.y >= Math.min(y1, y2) && t.y <= Math.max(y1, y2)
-            );
-            
-            renderMap();
-        }
-        
-        if (selectedTokens.length > 0 && !isSelecting) {
-            selectedTokens.forEach(t => delete t.dragOffset);
-            saveState();
-        }
-    });
-        canvas.addEventListener('mouseleave', () => {
-            if (isPanning) {
-                isPanning = false;
-                canvas.classList.remove('pan-mode');
-                saveState();
-            }
-            if (selectedToken) {
-                selectedToken = null;
-                saveState();
+        selectedTokens.forEach(token => {
+            if (token.dragOffset) {
+                token.x = x - token.dragOffset.x;
+                token.y = y - token.dragOffset.y;
             }
         });
+        renderMap();
+    }
+});
 
+canvas.addEventListener('mouseup', (e) => {
+    if (isPanning) {
+        isPanning = false;
+        canvas.classList.remove('pan-mode');
+        saveState();
+    }
+    
+    if (isSelecting) {
+        isSelecting = false;
+        
+        const x1 = selectionStart.x;
+        const y1 = selectionStart.y;
+        const x2 = selectionEnd.x;
+        const y2 = selectionEnd.y;
+        
+        selectedTokens = tokens.filter(t => 
+            t.x >= Math.min(x1, x2) && t.x <= Math.max(x1, x2) &&
+            t.y >= Math.min(y1, y2) && t.y <= Math.max(y1, y2)
+        );
+        
+        renderMap();
+    }
+    
+    if (selectedTokens.length > 0 && !isSelecting) {
+        selectedTokens.forEach(t => delete t.dragOffset);
+        saveState();
+    }
+});
         document.getElementById('clearTokens').addEventListener('click', () => {
             if (confirm('Clear all tokens?')) {
                 tokens = [];
