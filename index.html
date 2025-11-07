@@ -171,10 +171,10 @@
 .status {
     color: #2a7fff;
     font-size: 11px;
-    min-width: 100px;        /* Fixed width to prevent shifting */
+    min-width: 100px;
     text-align: center;
-    flex-shrink: 0;          /* Prevents shrinking */
-    white-space: nowrap;     /* Prevents text wrapping */
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .error {
@@ -259,7 +259,7 @@
 		
 		let isSelecting = false;
 		let selectionStart = { x: 0, y: 0 };
-		let selectionEnd = { x: 0, y: 0 }; // ADD THIS LINE
+		let selectionEnd = { x: 0, y: 0 };
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
             authDomain: "dnd-mapshare.firebaseapp.com",
@@ -514,11 +514,16 @@
 
 
 let zoomSaveTimeout = null;
-let isPanningWithMouse = false; // Separate from shift-pan
+let isPanningWithMouse = false;
 
 function applyTransform() {
     canvas.style.transformOrigin = "0 0";
     canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+}
+
+
+function clampPan() {
+  
 }
 
    function renderMap() {
@@ -749,7 +754,6 @@ function screenToCanvas(screenX, screenY) {
     };
 }
 
-    // Helper function to convert canvas coordinates to screen coordinates
  function canvasToScreen(canvasX, canvasY) {
     const rect = canvas.getBoundingClientRect();
     return {
@@ -820,7 +824,7 @@ function screenToCanvas(screenX, screenY) {
             document.getElementById('modeMove').classList.remove('active');
             document.getElementById('modePlace').classList.add('active');
 			selectedTokens = [];
-renderMap();
+            renderMap();
         });
 
         document.getElementById('visionSlider').addEventListener('input', (e) => {
@@ -836,247 +840,255 @@ renderMap();
             saveState();
         });
 
-    document.getElementById('resetZoom').addEventListener('click', () => {
-        zoom = 1;
-        panX = 0;
-        panY = 0;
-        applyTransform();
-        saveState();
-    });
+        document.getElementById('resetZoom').addEventListener('click', () => {
+            zoom = 1;
+            panX = 0;
+            panY = 0;
+            applyTransform();
+            saveState();
+        });
 
+ let targetZoom = 1;
+let zoomSmooth = null;
 
-canvas.addEventListener('wheel', (e) => {
+canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    
-    // Get mouse position in VIEWPORT coordinates (relative to canvas element)
+
     const rect = canvas.getBoundingClientRect();
-    const viewportX = e.clientX - rect.left;
-    const viewportY = e.clientY - rect.top;
-    
-    // Convert viewport coords to canvas coords using CURRENT transform
-    // Formula: canvasCoord = (viewportCoord - pan) / zoom
-    const canvasX = (viewportX - panX) / zoom;
-    const canvasY = (viewportY - panY) / zoom;
-    
-    // Zoom
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    const oldZoom = zoom;
-    zoom = Math.max(0.1, Math.min(5, zoom * zoomFactor));
-    
-    // Now reposition so that canvasX,canvasY is still under the mouse
-    // We want: viewportX = panX + canvasX * zoom
-    // Solving: panX = viewportX - canvasX * zoom
-    panX = viewportX - canvasX * zoom;
-    panY = viewportY - canvasY * zoom;
-    
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Get cursor position in map (before zoom)
+    const beforeZoomX = (mouseX - panX) / zoom;
+    const beforeZoomY = (mouseY - panY) / zoom;
+
+    // Compute zoom change
+    const zoomFactor = 1.05;
+    if (e.deltaY < 0) targetZoom = zoom * zoomFactor; // zoom in
+    else targetZoom = zoom / zoomFactor; // zoom out
+
+    targetZoom = Math.min(Math.max(targetZoom, 0.2), 8); // clamp zoom
+
+    // Adjust pan so the point under cursor stays fixed
+    panX = mouseX - beforeZoomX * targetZoom;
+    panY = mouseY - beforeZoomY * targetZoom;
+
+    zoom = targetZoom;
     applyTransform();
-    
-    // Debounced save
-    clearTimeout(zoomSaveTimeout);
-    zoomSaveTimeout = setTimeout(() => {
-        saveState();
-        zoomSaveTimeout = null;
-    }, 200);
-});
-canvas.addEventListener('mousedown', (e) => {
-    // Prevent middle-click scroll behavior
-    if (e.button === 1) {
-        e.preventDefault();
-    }
-    
-    // Middle mouse button or Shift+Left click for panning
-    if (e.button === 1 || (e.shiftKey && e.button === 0)) {
-        isPanning = true;
-        canvas.classList.add('pan-mode');
-        panStart = { x: e.clientX, y: e.clientY };
-        e.preventDefault();
-        return;
-    }
-    
-    // Only handle left click from here on
-    if (e.button !== 0 || e.shiftKey) return;
-    
-    const pos = screenToCanvas(e.clientX, e.clientY);
-    const x = pos.x;
-    const y = pos.y;
-    
-    if (mode === 'place' && placeType) {
-        let name;
-        const customName = document.getElementById('tokenName').value;
-        
-        if (customName) {
-            name = customName;
-        } else if (placeTokenName) {
-            name = placeTokenName;
-        } else {
-            if (placeType === 'player') name = 'P' + (++playerCount);
-            else if (placeType === 'enemy') name = 'E' + (++enemyCount);
-            else if (placeType === 'item') name = 'I' + (++itemCount);
-        }
-        
-        const newToken = { 
-            x, 
-            y, 
-            type: placeType, 
-            name: name
-        };
-        
-        if (placeTokenImage) {
-            newToken.image = placeTokenImage;
-        }
-        
-        tokens.push(newToken);
-        document.getElementById('tokenName').value = '';
-        
-        renderMap();
-        saveState();
-    } else if (mode === 'move') {
-        const clickedToken = tokens.find(t => 
-            Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-        );
-        
-        if (clickedToken && (e.ctrlKey || e.metaKey)) {
-            // Ctrl+click: toggle selection
-            const index = selectedTokens.indexOf(clickedToken);
-            if (index === -1) {
-                selectedTokens.push(clickedToken);
-            } else {
-                selectedTokens.splice(index, 1);
+
+    // Throttle saveState() to avoid spamming Firebase
+    clearTimeout(zoomSmooth);
+    zoomSmooth = setTimeout(() => saveState(), 300);
+}, { passive: false });
+
+
+        canvas.addEventListener('mousedown', (e) => {
+            // Prevent middle-click scroll behavior
+            if (e.button === 1) {
+                e.preventDefault();
             }
-            renderMap();
-        } else if (clickedToken && selectedTokens.includes(clickedToken)) {
-            // Clicked on already selected token: start dragging all selected
-            selectedTokens.forEach(t => {
-                t.dragOffset = { x: x - t.x, y: y - t.y };
-            });
-        } else if (clickedToken) {
-            // Clicked on unselected token: select only this one
-            selectedTokens = [clickedToken];
-            clickedToken.dragOffset = { x: x - clickedToken.x, y: y - clickedToken.y };
-            renderMap();
-        } else {
-            // Clicked on empty space: start selection box
-            selectedTokens = [];
-            isSelecting = true;
-            selectionStart = { x: x, y: y };
-            selectionEnd = { x: x, y: y };
-            renderMap();
-        }
-    }
-});
-canvas.addEventListener('mousemove', (e) => {
-    if (isPanning) {
-        // Simple screen-space delta
-        const dx = e.clientX - panStart.x;
-        const dy = e.clientY - panStart.y;
-        panX += dx;
-        panY += dy;
-        panStart = { x: e.clientX, y: e.clientY };
-        applyTransform();
-        return;
-    }
-
-    if (isSelecting) {
-        const pos = screenToCanvas(e.clientX, e.clientY);
-        selectionEnd.x = pos.x;
-        selectionEnd.y = pos.y;
-        renderMap();
-        return;
-    }
-
-    if (selectedTokens.length > 0 && mode === 'move') {
-        const pos = screenToCanvas(e.clientX, e.clientY);
-        const x = pos.x;
-        const y = pos.y;
-        
-        selectedTokens.forEach(token => {
-            if (token.dragOffset) {
-                token.x = x - token.dragOffset.x;
-                token.y = y - token.dragOffset.y;
+            
+            // Middle mouse button or Shift+Left click for panning
+            if (e.button === 1 || (e.shiftKey && e.button === 0)) {
+                isPanning = true;
+                canvas.classList.add('pan-mode');
+                panStart = { x: e.clientX, y: e.clientY };
+                e.preventDefault();
+                return;
+            }
+            
+            // Only handle left click from here on
+            if (e.button !== 0 || e.shiftKey) return;
+            
+            const pos = screenToCanvas(e.clientX, e.clientY);
+            const x = pos.x;
+            const y = pos.y;
+            
+            if (mode === 'place' && placeType) {
+                let name;
+                const customName = document.getElementById('tokenName').value;
+                
+                if (customName) {
+                    name = customName;
+                } else if (placeTokenName) {
+                    name = placeTokenName;
+                } else {
+                    if (placeType === 'player') name = 'P' + (++playerCount);
+                    else if (placeType === 'enemy') name = 'E' + (++enemyCount);
+                    else if (placeType === 'item') name = 'I' + (++itemCount);
+                }
+                
+                const newToken = { 
+                    x, 
+                    y, 
+                    type: placeType, 
+                    name: name
+                };
+                
+                if (placeTokenImage) {
+                    newToken.image = placeTokenImage;
+                }
+                
+                tokens.push(newToken);
+                document.getElementById('tokenName').value = '';
+                
+                renderMap();
+                saveState();
+            } else if (mode === 'move') {
+                const clickedToken = tokens.find(t => 
+                    Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+                );
+                
+                if (clickedToken && (e.ctrlKey || e.metaKey)) {
+                    // Ctrl+click: toggle selection
+                    const index = selectedTokens.indexOf(clickedToken);
+                    if (index === -1) {
+                        selectedTokens.push(clickedToken);
+                    } else {
+                        selectedTokens.splice(index, 1);
+                    }
+                    renderMap();
+                } else if (clickedToken && selectedTokens.includes(clickedToken)) {
+                    // Clicked on already selected token: start dragging all selected
+                    selectedTokens.forEach(t => {
+                        t.dragOffset = { x: x - t.x, y: y - t.y };
+                    });
+                } else if (clickedToken) {
+                    // Clicked on unselected token: select only this one
+                    selectedTokens = [clickedToken];
+                    clickedToken.dragOffset = { x: x - clickedToken.x, y: y - clickedToken.y };
+                    renderMap();
+                } else {
+                    // Clicked on empty space: start selection box
+                    selectedTokens = [];
+                    isSelecting = true;
+                    selectionStart = { x: x, y: y };
+                    selectionEnd = { x: x, y: y };
+                    renderMap();
+                }
             }
         });
-        renderMap();
-    }
-});
 
-canvas.addEventListener('mouseup', (e) => {
-    if (isPanning) {
-        isPanning = false;
-        canvas.classList.remove('pan-mode');
-        saveState();
-        return;
-    }
-    
-    if (isSelecting) {
-        isSelecting = false;
-        
-        const x1 = selectionStart.x;
-        const y1 = selectionStart.y;
-        const x2 = selectionEnd.x;
-        const y2 = selectionEnd.y;
-        
-        selectedTokens = tokens.filter(t => 
-            t.x >= Math.min(x1, x2) && t.x <= Math.max(x1, x2) &&
-            t.y >= Math.min(y1, y2) && t.y <= Math.max(y1, y2)
-        );
-        
-        renderMap();
-        return;
-    }
-    
-    if (selectedTokens.length > 0) {
-        selectedTokens.forEach(t => delete t.dragOffset);
-        saveState();
-    }
-});
-canvas.addEventListener('mouseleave', () => {
-    if (isPanning) {
-        isPanning = false;
-        canvas.classList.remove('pan-mode');
-        saveState();
-    }
-    if (selectedTokens.length > 0) {
-        selectedTokens.forEach(t => delete t.dragOffset);
-        saveState();
-    }
-});
-canvas.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    const pos = screenToCanvas(e.clientX, e.clientY);
-    const x = pos.x;
-    const y = pos.y;
-    
-    // Check if we clicked on any selected token
-    const clickedSelectedToken = selectedTokens.find(t => 
-        Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-    );
-    
-    if (clickedSelectedToken && selectedTokens.length > 1) {
-        // Delete all selected tokens
-        tokens = tokens.filter(t => !selectedTokens.includes(t));
-        selectedTokens = [];
-        renderMap();
-        saveState();
-    } else {
-        // Delete single token under cursor
-        const index = tokens.findIndex(t => 
-            Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-        );
-        if (index !== -1) {
-            const deletedToken = tokens[index];
-            tokens.splice(index, 1);
-            
-            // Remove from selectedTokens if it was selected
-            const selectedIndex = selectedTokens.indexOf(deletedToken);
-            if (selectedIndex !== -1) {
-                selectedTokens.splice(selectedIndex, 1);
+        canvas.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                const dx = e.clientX - panStart.x;
+                const dy = e.clientY - panStart.y;
+                panX += dx;
+                panY += dy;
+                panStart = { x: e.clientX, y: e.clientY };
+                clampPan();
+                applyTransform();
+                return;
+            }
+
+            if (isSelecting) {
+                const pos = screenToCanvas(e.clientX, e.clientY);
+                selectionEnd.x = pos.x;
+                selectionEnd.y = pos.y;
+                renderMap();
+                return;
+            }
+
+            if (selectedTokens.length > 0 && mode === 'move') {
+                const pos = screenToCanvas(e.clientX, e.clientY);
+                const x = pos.x;
+                const y = pos.y;
+                
+                selectedTokens.forEach(token => {
+                    if (token.dragOffset) {
+                        token.x = x - token.dragOffset.x;
+                        token.y = y - token.dragOffset.y;
+                    }
+                });
+                renderMap();
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            clampPan();
+            applyTransform();
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.classList.remove('pan-mode');
+                saveState();
+                return;
             }
             
-            renderMap();
-            saveState();
-        }
-    }
-});
+            if (isSelecting) {
+                isSelecting = false;
+                
+                const x1 = selectionStart.x;
+                const y1 = selectionStart.y;
+                const x2 = selectionEnd.x;
+                const y2 = selectionEnd.y;
+                
+                selectedTokens = tokens.filter(t => 
+                    t.x >= Math.min(x1, x2) && t.x <= Math.max(x1, x2) &&
+                    t.y >= Math.min(y1, y2) && t.y <= Math.max(y1, y2)
+                );
+                
+                renderMap();
+                return;
+            }
+            
+            if (selectedTokens.length > 0) {
+                selectedTokens.forEach(t => delete t.dragOffset);
+                saveState();
+            }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.classList.remove('pan-mode');
+                saveState();
+            }
+            if (selectedTokens.length > 0) {
+                selectedTokens.forEach(t => delete t.dragOffset);
+                saveState();
+            }
+        });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const pos = screenToCanvas(e.clientX, e.clientY);
+            const x = pos.x;
+            const y = pos.y;
+            
+            // Check if we clicked on any selected token
+            const clickedSelectedToken = selectedTokens.find(t => 
+                Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+            );
+            
+            if (clickedSelectedToken && selectedTokens.length > 1) {
+                // Delete all selected tokens
+                tokens = tokens.filter(t => !selectedTokens.includes(t));
+                selectedTokens = [];
+                renderMap();
+                saveState();
+            } else {
+                // Delete single token under cursor
+                const index = tokens.findIndex(t => 
+                    Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
+                );
+                if (index !== -1) {
+                    const deletedToken = tokens[index];
+                    tokens.splice(index, 1);
+                    
+                    // Remove from selectedTokens if it was selected
+                    const selectedIndex = selectedTokens.indexOf(deletedToken);
+                    if (selectedIndex !== -1) {
+                        selectedTokens.splice(selectedIndex, 1);
+                    }
+                    
+                    renderMap();
+                    saveState();
+                }
+            }
+        });
 
         canvas.classList.add('move-mode');
     </script>
