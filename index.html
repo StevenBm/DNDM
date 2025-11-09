@@ -893,7 +893,7 @@ canvas.addEventListener("wheel", (e) => {
     // Zoom
     const scaleBy = 1.2;
     let direction = e.deltaY > 0 ? -1 : 1;
-    if (e.ctrlKey) direction = -direction;
+ 
     
     const oldZoom = zoom;
     zoom = direction > 0 ? zoom * scaleBy : zoom / scaleBy;
@@ -905,8 +905,6 @@ canvas.addEventListener("wheel", (e) => {
 
 
     renderMap();
-
-    debugEl.textContent = `zoom=${zoom.toFixed(3)} pan=${panX.toFixed(1)},${panY.toFixed(1)}`;
 
     clearTimeout(zoomSaveTimeout);
     zoomSaveTimeout = setTimeout(() => saveState(), 300);
