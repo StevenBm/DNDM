@@ -251,7 +251,7 @@
         let isSelecting = false;
         let selectionStart = { x: 0, y: 0 };
         let selectionEnd = { x: 0, y: 0 };
-        let isPlacingToken = false; // NEW: Track if we're in the process of placing
+        let isPlacingToken = false;
 
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
@@ -396,7 +396,13 @@
             onValue(stateRef, (snapshot) => {
                 const data = snapshot.val();
                 if (data) {
+                    console.log('=== FIREBASE UPDATE RECEIVED ===');
+                    console.log('isLocalUpdate flag:', isLocalUpdate);
+                    console.log('Current tokens length:', tokens.length);
+                    console.log('Incoming tokens length:', data.tokens?.length);
+                    
                     if (isLocalUpdate) {
+                        console.log('Ignoring - was local change');
                         isLocalUpdate = false;
                         return;
                     }
@@ -412,8 +418,7 @@
                         img.src = data.mapData;
                     }
                     
-                    // Only update zoom/pan when idle
-                    if (!zoomSaveTimeout && !isPanning && !isSelecting && selectedTokens.length === 0 && !isPlacingToken) {
+                    if (!zoomSaveTimeout && !isPanning && !isSelecting && selectedTokens.length === 0 && !isPlacingToken && !saveTimeout) {
                         if (data.zoom !== undefined && data.pan) {
                             zoom = data.zoom;
                             panX = data.pan.x;
@@ -423,7 +428,15 @@
                     }
                     
                     if (data.tokens) {
+                        console.log('Replacing tokens from Firebase');
+                        console.log('Current tokens.length:', tokens.length);
+                        console.log('Incoming tokens.length:', data.tokens.length);
+                        console.log('Incoming tokens:', JSON.stringify(data.tokens.map(t => ({name: t.name, x: Math.round(t.x), y: Math.round(t.y)}))));
+                        
                         tokens = data.tokens;
+                        
+                        console.log('After replacement - tokens.length:', tokens.length);
+                        
                         playerCount = tokens.filter(t => t.type === 'player').length;
                         enemyCount = tokens.filter(t => t.type === 'enemy').length;
                         itemCount = tokens.filter(t => t.type === 'item').length;
@@ -447,6 +460,9 @@
         async function saveState() {
             if (!db) return;
             
+            console.log('=== SAVE CALLED ===');
+            console.log('Tokens to save:', tokens.length);
+            
             isLocalUpdate = true;
             
             if (saveTimeout) {
@@ -454,7 +470,18 @@
             }
             
             saveTimeout = setTimeout(async () => {
-                const mapData = mapImage ? canvas.toDataURL('image/jpeg', 0.7) : null;
+                // CRITICAL: Save the ORIGINAL map image, not the rendered canvas
+                let mapData = null;
+                if (mapImage) {
+                    // Create a temporary canvas with just the map
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = mapImage.width;
+                    tempCanvas.height = mapImage.height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.drawImage(mapImage, 0, 0);
+                    mapData = tempCanvas.toDataURL('image/jpeg', 0.7);
+                }
+                
                 const state = {
                     mapData: mapData,
                     tokens: tokens,
@@ -467,11 +494,12 @@
                     timestamp: Date.now()
                 };
                 
-                console.log('Saving state - Tokens:', tokens.length, 'Zoom:', zoom, 'Pan:', panX, panY);
+                console.log('Saving tokens:', state.tokens.length);
                 
                 try {
                     await set(ref(db, 'gameState'), state);
                     statusEl.textContent = '✓ Synced';
+                    console.log('Save complete');
                     setTimeout(() => {
                         statusEl.textContent = '✓ Connected to Firebase';
                     }, 1000);
@@ -480,7 +508,7 @@
                     statusEl.classList.add('error');
                     console.error('Save error:', e);
                 }
-            }, 200); // Increased debounce to 200ms
+            }, 200);
         }
 
         document.getElementById('mapUpload').addEventListener('change', (e) => {
@@ -506,21 +534,32 @@
         });
 
         function renderMap() {
-            ctx.save();
+            // STEP 1: Nuclear clear - ensure nothing persists
+            const w = canvas.width;
+            const h = canvas.height;
             
             ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.globalCompositeOperation = 'source-over';
             
-            ctx.translate(canvas.width / 2, canvas.height / 2);
+            // Clear and fill with background color
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, w, h);
+            
+            // STEP 2: Apply transform
+            ctx.translate(w / 2, h / 2);
             ctx.scale(zoom, zoom);
-            ctx.translate(-canvas.width / 2 + panX / zoom, -canvas.height / 2 + panY / zoom);
+            ctx.translate(-w / 2 + panX / zoom, -h / 2 + panY / zoom);
             
+            // STEP 3: Draw map
             if (mapImage) {
                 ctx.drawImage(mapImage, 0, 0);
             }
             
+            // STEP 4: Draw tokens
             renderTokens();
             
+            // STEP 5: Draw selection box
             if (isSelecting && selectionStart.x !== undefined) {
                 ctx.strokeStyle = '#2a7fff';
                 ctx.lineWidth = 2 / zoom;
@@ -542,11 +581,20 @@
                 ctx.setLineDash([]);
             }
             
-            ctx.restore();
+            // STEP 6: Reset transform
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
 
         function renderTokens() {
+            console.log('=== RENDERING TOKENS ===');
+            console.log('tokens.length:', tokens.length);
+            console.log('tokens array:', tokens.map(t => ({name: t.name, x: Math.round(t.x), y: Math.round(t.y)})));
+            
+            let renderCount = 0;
             tokens.forEach(token => {
+                renderCount++;
+                console.log(`Rendering token #${renderCount}:`, token.name, 'at', Math.round(token.x), Math.round(token.y));
+                
                 if (token.image && tokenImages[token.image]) {
                     const img = tokenImages[token.image];
                     ctx.save();
@@ -609,6 +657,8 @@
                 ctx.stroke();
                 ctx.setLineDash([]);
             });
+            
+            console.log(`Total tokens rendered: ${renderCount}`);
         }
 
         function loadTokenImage(imagePath) {
@@ -739,10 +789,12 @@
 
         function screenToCanvas(screenX, screenY) {
             const rect = canvas.getBoundingClientRect();
-            const mouseX = screenX - rect.left - rect.width / 2;
-            const mouseY = screenY - rect.top - rect.height / 2;
-            const worldX = (mouseX - panX) / zoom + canvas.width / 2;
-            const worldY = (mouseY - panY) / zoom + canvas.height / 2;
+            const canvasX = screenX - rect.left;
+            const canvasY = screenY - rect.top;
+            const centerX = canvasX - rect.width / 2;
+            const centerY = canvasY - rect.height / 2;
+            const worldX = (centerX - panX) / zoom + canvas.width / 2;
+            const worldY = (centerY - panY) / zoom + canvas.height / 2;
             return { x: worldX, y: worldY };
         }
 
@@ -845,7 +897,6 @@
             const scaleBy = 1.2;
             let direction = e.deltaY > 0 ? -1 : 1;
             
-            const oldZoom = zoom;
             zoom = direction > 0 ? zoom * scaleBy : zoom / scaleBy;
             zoom = Math.min(Math.max(zoom, 0.2), 8);
 
@@ -877,8 +928,9 @@
             const x = pos.x;
             const y = pos.y;
             
+            console.log('CLICK - World:', x, y);
+            
             if (mode === 'place' && placeType) {
-                // CRITICAL FIX: Set flag to prevent race condition
                 isPlacingToken = true;
                 
                 let name;
@@ -905,26 +957,24 @@
                     newToken.image = placeTokenImage;
                 }
                 
-                console.log('=== PLACING TOKEN ===');
-                console.log('Token:', newToken);
-                console.log('Total tokens before:', tokens.length);
+                console.log('=== PLACING ===');
+                console.log('Before push - tokens array:', JSON.stringify(tokens.map(t => ({name: t.name, x: Math.round(t.x), y: Math.round(t.y)}))));
+                console.log('Before push - tokens.length:', tokens.length);
                 
                 tokens.push(newToken);
                 
-                console.log('Total tokens after:', tokens.length);
-                console.log('All tokens:', tokens.map(t => ({name: t.name, type: t.type})));
+                console.log('After push - tokens.length:', tokens.length);
+                console.log('After push - tokens array:', JSON.stringify(tokens.map(t => ({name: t.name, x: Math.round(t.x), y: Math.round(t.y)}))));
+                console.log('New token:', JSON.stringify({name: newToken.name, x: Math.round(newToken.x), y: Math.round(newToken.y)}));
                 
                 document.getElementById('tokenName').value = '';
                 
                 renderMap();
+                saveState();
                 
-                // Save and then clear the flag with a small delay to ensure single save
                 setTimeout(() => {
-                    saveState();
-                    setTimeout(() => {
-                        isPlacingToken = false;
-                    }, 300);
-                }, 50);
+                    isPlacingToken = false;
+                }, 500);
                 
             } else if (mode === 'move') {
                 const clickedToken = tokens.find(t => 
