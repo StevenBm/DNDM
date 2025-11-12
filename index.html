@@ -181,33 +181,42 @@
         }
         #hpEditor {
             position: fixed;
-            background: rgba(0,0,0,0.9);
-            border: 2px solid #4a4a4a;
+            background: rgba(20, 20, 20, 0.95);
+            border: 3px solid #4a4a4a;
             border-radius: 8px;
-            padding: 12px;
+            padding: 16px;
             display: none;
-            z-index: 1000;
-            min-width: 150px;
+            z-index: 10000;
+            min-width: 180px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
         }
         #hpEditor.show {
             display: block;
         }
         #hpEditor .hp-display {
             text-align: center;
-            font-size: 18px;
+            font-size: 24px;
             font-weight: bold;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
             color: #fff;
         }
         #hpEditor .hp-controls {
             display: flex;
             gap: 8px;
             justify-content: center;
+            flex-wrap: wrap;
         }
         #hpEditor button {
-            font-size: 16px;
-            padding: 8px 16px;
-            min-width: 40px;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 10px 18px;
+            min-width: 50px;
+            background: #4a4a4a;
+            border: 2px solid #6a6a6a;
+        }
+        #hpEditor button:hover {
+            background: #5a5a5a;
+            border-color: #7a7a7a;
         }
     </style>
 </head>
@@ -694,20 +703,33 @@
                 // Draw HP for players and enemies
                 if ((token.type === 'player' || token.type === 'enemy') && token.hp !== undefined) {
                     const hpText = `${token.hp}${token.maxHp ? '/' + token.maxHp : ''}`;
+                    
+                    // Draw HP background box
+                    ctx.font = 'bold 14px Arial';
+                    const metrics = ctx.measureText(hpText);
+                    const boxWidth = metrics.width + 8;
+                    const boxHeight = 20;
+                    const boxX = token.x - boxWidth / 2;
+                    const boxY = token.y - tokenSize - boxHeight - 5;
+                    
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+                    ctx.strokeStyle = token.type === 'player' ? '#2a7fff' : '#ff2a2a';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+                    
+                    // Draw HP text
                     ctx.fillStyle = '#fff';
-                    ctx.font = 'bold 10px Arial';
                     ctx.textAlign = 'center';
-                    ctx.textBaseline = 'bottom';
-                    ctx.strokeStyle = '#000';
-                    ctx.lineWidth = 3;
-                    ctx.strokeText(hpText, token.x, token.y - tokenSize - 3);
-                    ctx.fillText(hpText, token.x, token.y - tokenSize - 3);
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(hpText, token.x, boxY + boxHeight / 2);
                 }
             });
 
             selectedTokens.forEach(token => {
+                const tokenSize = (token.size || 1) * 20;
                 ctx.beginPath();
-                ctx.arc(token.x, token.y, 25, 0, Math.PI * 2);
+                ctx.arc(token.x, token.y, tokenSize + 5, 0, Math.PI * 2);
                 ctx.strokeStyle = '#ffff00';
                 ctx.lineWidth = 2;
                 ctx.setLineDash([5, 5]);
@@ -1038,14 +1060,16 @@
                 const folder = placeType === 'player' ? 'players' : placeType === 'enemy' ? 'enemies' : 'items';
                 if (tokenProperties[folder] && tokenProperties[folder][name]) {
                     const props = tokenProperties[folder][name];
-                    if (props.size) newToken.size = props.size;
-                    if (props.hp) newToken.hp = props.hp;
-                    if (props.maxHp) newToken.maxHp = props.maxHp;
-                    console.log('Applied properties:', props);
+                    if (props.size !== undefined) newToken.size = props.size;
+                    if (props.hp !== undefined) newToken.hp = props.hp;
+                    if (props.maxHp !== undefined) newToken.maxHp = props.maxHp;
+                    console.log('Applied properties for', name, ':', props);
+                } else {
+                    console.log('No properties found for', name, 'in folder', folder);
                 }
                 
                 // Set default size if not specified
-                if (!newToken.size) newToken.size = 1;
+                if (newToken.size === undefined) newToken.size = 1;
                 
                 console.log('=== PLACING ===');
                 console.log('Before push - tokens array:', JSON.stringify(tokens.map(t => ({name: t.name, x: Math.round(t.x), y: Math.round(t.y)}))));
@@ -1202,9 +1226,24 @@
                 const hpEditor = document.getElementById('hpEditor');
                 const hpDisplay = document.getElementById('hpDisplay');
                 hpDisplay.textContent = `${clickedToken.hp}${clickedToken.maxHp ? '/' + clickedToken.maxHp : ''}`;
-                hpEditor.style.left = e.clientX + 'px';
-                hpEditor.style.top = e.clientY + 'px';
+                
+                // Position near click but keep on screen
+                let left = e.clientX + 10;
+                let top = e.clientY + 10;
+                
+                // Prevent going off right edge
+                if (left + 200 > window.innerWidth) {
+                    left = e.clientX - 210;
+                }
+                // Prevent going off bottom edge
+                if (top + 150 > window.innerHeight) {
+                    top = e.clientY - 160;
+                }
+                
+                hpEditor.style.left = left + 'px';
+                hpEditor.style.top = top + 'px';
                 hpEditor.classList.add('show');
+                console.log('HP editor shown at', left, top);
                 return;
             }
             
@@ -1265,6 +1304,16 @@
             if (!e.target.closest('#hpEditor') && !e.target.closest('#mapCanvas')) {
                 document.getElementById('hpEditor').classList.remove('show');
                 selectedTokenForHP = null;
+            }
+        });
+
+        // Delete key to remove selected tokens
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Delete' && selectedTokens.length > 0) {
+                tokens = tokens.filter(t => !selectedTokens.includes(t));
+                selectedTokens = [];
+                renderMap();
+                saveState();
             }
         });
 

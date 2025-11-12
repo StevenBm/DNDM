@@ -151,9 +151,35 @@
                     panY = data.pan.y;
                 }
                 
-                // Update tokens - filter for players only
-                tokens = (data.tokens || []).filter(t => t.type === 'player');
-                console.log('Player tokens:', tokens.length);
+                // Store all tokens for visibility checking
+                const allTokens = data.tokens || [];
+                const playerTokens = allTokens.filter(t => t.type === 'player');
+                
+                // Determine which tokens to show
+                if (currentFog.enabled && playerTokens.length > 0) {
+                    // Fog ON: show players + enemies within vision range
+                    tokens = allTokens.filter(t => {
+                        if (t.type === 'player') return true;
+                        
+                        // Check if enemy is within vision range of any player
+                        if (t.type === 'enemy') {
+                            return playerTokens.some(player => {
+                                const dist = Math.sqrt(
+                                    (player.x - t.x) ** 2 + 
+                                    (player.y - t.y) ** 2
+                                );
+                                return dist <= currentFog.radius;
+                            });
+                        }
+                        
+                        return false; // Don't show items
+                    });
+                } else {
+                    // Fog OFF: show everything except items
+                    tokens = allTokens.filter(t => t.type === 'player' || t.type === 'enemy');
+                }
+                
+                console.log('Visible tokens:', tokens.length, '(', tokens.filter(t => t.type === 'player').length, 'players,', tokens.filter(t => t.type === 'enemy').length, 'enemies)');
                 
                 tokens.forEach(token => {
                     if (token.image && !tokenImages[token.image]) {
@@ -210,7 +236,7 @@
             // Draw map
             offCtx.drawImage(mapImage, 0, 0);
 
-            // Draw all player tokens
+            // Draw all visible tokens
             tokens.forEach(token => {
                 const tokenSize = (token.size || 1) * 20;
                 const imageSize = tokenSize * 2;
@@ -228,15 +254,20 @@
                     
                     offCtx.beginPath();
                     offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
-                    offCtx.strokeStyle = '#2a7fff';
+                    offCtx.strokeStyle = token.type === 'player' ? '#2a7fff' : '#ff2a2a';
                     offCtx.lineWidth = 3;
                     offCtx.stroke();
                 } else {
                     offCtx.beginPath();
                     offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
-                    offCtx.fillStyle = 'rgba(42, 127, 255, 0.8)';
+                    if (token.type === 'player') {
+                        offCtx.fillStyle = 'rgba(42, 127, 255, 0.8)';
+                        offCtx.strokeStyle = '#2a7fff';
+                    } else if (token.type === 'enemy') {
+                        offCtx.fillStyle = 'rgba(255, 42, 42, 0.8)';
+                        offCtx.strokeStyle = '#ff2a2a';
+                    }
                     offCtx.fill();
-                    offCtx.strokeStyle = '#2a7fff';
                     offCtx.lineWidth = 3;
                     offCtx.stroke();
                 }
@@ -257,11 +288,14 @@
             if (fog.enabled) {
                 console.log('Drawing fog with mask approach...');
                 
+                // Get only player tokens for vision circles
+                const playerTokens = tokens.filter(t => t.type === 'player');
+                
                 // Restore to screen space
                 offCtx.restore();
                 
-                if (tokens.length > 0) {
-                    console.log('Creating vision mask for', tokens.length, 'tokens');
+                if (playerTokens.length > 0) {
+                    console.log('Creating vision mask for', playerTokens.length, 'player tokens');
                     
                     // Create a mask canvas
                     const maskCanvas = document.createElement('canvas');
@@ -280,7 +314,7 @@
                     
                     // Cut out vision circles using destination-out
                     maskCtx.globalCompositeOperation = 'destination-out';
-                    tokens.forEach(token => {
+                    playerTokens.forEach(token => {
                         console.log('Cutting circle at', token.x, token.y);
                         const gradient = maskCtx.createRadialGradient(
                             token.x, token.y, 0,
@@ -301,7 +335,7 @@
                     offCtx.globalAlpha = 1.0;
                     console.log('Mask applied');
                 } else {
-                    console.log('No tokens - drawing complete darkness');
+                    console.log('No player tokens - drawing complete darkness');
                     offCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
                     offCtx.fillRect(0, 0, canvas.width, canvas.height);
                 }
