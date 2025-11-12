@@ -1,0 +1,17 @@
+{
+  "Owlbear": {
+    "size": 2.0,
+    "hp": 59,
+    "maxHp": 59
+  },
+  "orc": {
+    "size": 0.8,
+    "hp": 7,
+    "maxHp": 7
+  },
+  "Dragon": {
+    "size": 3.0,
+    "hp": 200,
+    "maxHp": 200
+  }
+}

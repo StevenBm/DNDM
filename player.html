@@ -212,25 +212,28 @@
 
             // Draw all player tokens
             tokens.forEach(token => {
+                const tokenSize = (token.size || 1) * 20;
+                const imageSize = tokenSize * 2;
+                
                 if (token.image && tokenImages[token.image]) {
                     const img = tokenImages[token.image];
                     
                     offCtx.save();
                     offCtx.beginPath();
-                    offCtx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
                     offCtx.closePath();
                     offCtx.clip();
-                    offCtx.drawImage(img, token.x - 20, token.y - 20, 40, 40);
+                    offCtx.drawImage(img, token.x - tokenSize, token.y - tokenSize, imageSize, imageSize);
                     offCtx.restore();
                     
                     offCtx.beginPath();
-                    offCtx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
                     offCtx.strokeStyle = '#2a7fff';
                     offCtx.lineWidth = 3;
                     offCtx.stroke();
                 } else {
                     offCtx.beginPath();
-                    offCtx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
                     offCtx.fillStyle = 'rgba(42, 127, 255, 0.8)';
                     offCtx.fill();
                     offCtx.strokeStyle = '#2a7fff';
@@ -245,8 +248,8 @@
                 offCtx.textBaseline = 'top';
                 offCtx.strokeStyle = '#000';
                 offCtx.lineWidth = 3;
-                offCtx.strokeText(token.name, token.x, token.y + 23);
-                offCtx.fillText(token.name, token.x, token.y + 23);
+                offCtx.strokeText(token.name, token.x, token.y + tokenSize + 3);
+                offCtx.fillText(token.name, token.x, token.y + tokenSize + 3);
             });
 
             // Apply fog of war - MASK APPROACH

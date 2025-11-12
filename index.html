@@ -179,6 +179,36 @@
         .error {
             color: #ff2a2a;
         }
+        #hpEditor {
+            position: fixed;
+            background: rgba(0,0,0,0.9);
+            border: 2px solid #4a4a4a;
+            border-radius: 8px;
+            padding: 12px;
+            display: none;
+            z-index: 1000;
+            min-width: 150px;
+        }
+        #hpEditor.show {
+            display: block;
+        }
+        #hpEditor .hp-display {
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+        #hpEditor .hp-controls {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+        }
+        #hpEditor button {
+            font-size: 16px;
+            padding: 8px 16px;
+            min-width: 40px;
+        }
     </style>
 </head>
 <body>
@@ -214,6 +244,15 @@
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
     </div>
+    <div id="hpEditor">
+        <div class="hp-display" id="hpDisplay">0/0</div>
+        <div class="hp-controls">
+            <button id="hpMinus5">-5</button>
+            <button id="hpMinus1">-1</button>
+            <button id="hpPlus1">+1</button>
+            <button id="hpPlus5">+5</button>
+        </div>
+    </div>
 
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
@@ -240,6 +279,8 @@
         let playerLibrary = {};
         let enemyLibrary = {};
         let itemLibrary = {};
+        let tokenProperties = {}; // Store properties for all tokens
+        let selectedTokenForHP = null; // Track which token's HP is being edited
         let isLocalUpdate = false;
         let zoom = 1;
         let panX = 0;
@@ -595,22 +636,24 @@
                 renderCount++;
                 console.log(`Rendering token #${renderCount}:`, token.name, 'at', Math.round(token.x), Math.round(token.y));
                 
+                const tokenSize = (token.size || 1) * 20; // Base size 20, multiply by size modifier
+                
                 if (token.image && tokenImages[token.image]) {
                     const img = tokenImages[token.image];
                     ctx.save();
                     
                     ctx.beginPath();
-                    ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    ctx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
                     ctx.closePath();
                     ctx.clip();
                     
-                    const size = 40;
-                    ctx.drawImage(img, token.x - 20, token.y - 20, size, size);
+                    const imageSize = tokenSize * 2;
+                    ctx.drawImage(img, token.x - tokenSize, token.y - tokenSize, imageSize, imageSize);
                     
                     ctx.restore();
                     
                     ctx.beginPath();
-                    ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    ctx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
                     if (token.type === 'player') {
                         ctx.strokeStyle = '#2a7fff';
                     } else if (token.type === 'enemy') {
@@ -622,7 +665,7 @@
                     ctx.stroke();
                 } else {
                     ctx.beginPath();
-                    ctx.arc(token.x, token.y, 20, 0, Math.PI * 2);
+                    ctx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
                     if (token.type === 'player') {
                         ctx.fillStyle = 'rgba(42, 127, 255, 0.8)';
                         ctx.strokeStyle = '#2a7fff';
@@ -638,14 +681,28 @@
                     ctx.stroke();
                 }
                 
+                // Draw name
                 ctx.fillStyle = '#fff';
                 ctx.font = 'bold 11px Arial';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'top';
                 ctx.strokeStyle = '#000';
                 ctx.lineWidth = 3;
-                ctx.strokeText(token.name, token.x, token.y + 23);
-                ctx.fillText(token.name, token.x, token.y + 23);
+                ctx.strokeText(token.name, token.x, token.y + tokenSize + 3);
+                ctx.fillText(token.name, token.x, token.y + tokenSize + 3);
+                
+                // Draw HP for players and enemies
+                if ((token.type === 'player' || token.type === 'enemy') && token.hp !== undefined) {
+                    const hpText = `${token.hp}${token.maxHp ? '/' + token.maxHp : ''}`;
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 3;
+                    ctx.strokeText(hpText, token.x, token.y - tokenSize - 3);
+                    ctx.fillText(hpText, token.x, token.y - tokenSize - 3);
+                }
             });
 
             selectedTokens.forEach(token => {
@@ -685,6 +742,26 @@
                 const data = await response.json();
                 
                 if (data.tree) {
+                    // Load properties files first
+                    const propertiesFiles = data.tree.filter(item => 
+                        item.path.endsWith('properties.json')
+                    );
+                    
+                    for (const propFile of propertiesFiles) {
+                        try {
+                            const propResponse = await fetch(`https://raw.githubusercontent.com/${repoOwner}/${repoName}/${branch}/${propFile.path}`);
+                            const properties = await propResponse.json();
+                            
+                            // Store properties by folder
+                            const folder = propFile.path.split('/')[0];
+                            if (!tokenProperties[folder]) tokenProperties[folder] = {};
+                            Object.assign(tokenProperties[folder], properties);
+                            console.log(`Loaded properties for ${folder}:`, properties);
+                        } catch (e) {
+                            console.warn(`Failed to load properties from ${propFile.path}:`, e);
+                        }
+                    }
+                    
                     const playerFiles = data.tree.filter(item => 
                         item.path.startsWith('players/') && 
                         item.type === 'blob' &&
@@ -957,6 +1034,19 @@
                     newToken.image = placeTokenImage;
                 }
                 
+                // Add properties from JSON if available
+                const folder = placeType === 'player' ? 'players' : placeType === 'enemy' ? 'enemies' : 'items';
+                if (tokenProperties[folder] && tokenProperties[folder][name]) {
+                    const props = tokenProperties[folder][name];
+                    if (props.size) newToken.size = props.size;
+                    if (props.hp) newToken.hp = props.hp;
+                    if (props.maxHp) newToken.maxHp = props.maxHp;
+                    console.log('Applied properties:', props);
+                }
+                
+                // Set default size if not specified
+                if (!newToken.size) newToken.size = 1;
+                
                 console.log('=== PLACING ===');
                 console.log('Before push - tokens array:', JSON.stringify(tokens.map(t => ({name: t.name, x: Math.round(t.x), y: Math.round(t.y)}))));
                 console.log('Before push - tokens.length:', tokens.length);
@@ -1100,9 +1190,28 @@
             const x = pos.x;
             const y = pos.y;
             
-            const clickedSelectedToken = selectedTokens.find(t => 
-                Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-            );
+            // Check if clicking on a token with HP
+            const clickedToken = tokens.find(t => {
+                const tokenSize = (t.size || 1) * 20;
+                return Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < tokenSize;
+            });
+            
+            if (clickedToken && (clickedToken.type === 'player' || clickedToken.type === 'enemy') && clickedToken.hp !== undefined) {
+                // Show HP editor
+                selectedTokenForHP = clickedToken;
+                const hpEditor = document.getElementById('hpEditor');
+                const hpDisplay = document.getElementById('hpDisplay');
+                hpDisplay.textContent = `${clickedToken.hp}${clickedToken.maxHp ? '/' + clickedToken.maxHp : ''}`;
+                hpEditor.style.left = e.clientX + 'px';
+                hpEditor.style.top = e.clientY + 'px';
+                hpEditor.classList.add('show');
+                return;
+            }
+            
+            const clickedSelectedToken = selectedTokens.find(t => {
+                const tokenSize = (t.size || 1) * 20;
+                return Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < tokenSize;
+            });
             
             if (clickedSelectedToken && selectedTokens.length > 1) {
                 tokens = tokens.filter(t => !selectedTokens.includes(t));
@@ -1110,9 +1219,11 @@
                 renderMap();
                 saveState();
             } else {
-                const index = tokens.findIndex(t => 
-                    Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-                );
+                const tokenSize = 20; // Use default for finding
+                const index = tokens.findIndex(t => {
+                    const tSize = (t.size || 1) * 20;
+                    return Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < tSize;
+                });
                 if (index !== -1) {
                     const deletedToken = tokens[index];
                     tokens.splice(index, 1);
@@ -1125,6 +1236,35 @@
                     renderMap();
                     saveState();
                 }
+            }
+        });
+
+        // HP Editor controls
+        document.getElementById('hpMinus5').addEventListener('click', () => modifyHP(-5));
+        document.getElementById('hpMinus1').addEventListener('click', () => modifyHP(-1));
+        document.getElementById('hpPlus1').addEventListener('click', () => modifyHP(1));
+        document.getElementById('hpPlus5').addEventListener('click', () => modifyHP(5));
+
+        function modifyHP(amount) {
+            if (!selectedTokenForHP) return;
+            
+            selectedTokenForHP.hp = Math.max(0, selectedTokenForHP.hp + amount);
+            if (selectedTokenForHP.maxHp) {
+                selectedTokenForHP.hp = Math.min(selectedTokenForHP.maxHp, selectedTokenForHP.hp);
+            }
+            
+            const hpDisplay = document.getElementById('hpDisplay');
+            hpDisplay.textContent = `${selectedTokenForHP.hp}${selectedTokenForHP.maxHp ? '/' + selectedTokenForHP.maxHp : ''}`;
+            
+            renderMap();
+            saveState();
+        }
+
+        // Close HP editor when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#hpEditor') && !e.target.closest('#mapCanvas')) {
+                document.getElementById('hpEditor').classList.remove('show');
+                selectedTokenForHP = null;
             }
         });
 
