@@ -157,9 +157,10 @@
                 
                 // Determine which tokens to show
                 if (currentFog.enabled && playerTokens.length > 0) {
-                    // Fog ON: show players + enemies within vision range
+                    // Fog ON: show players + enemies within vision range + all items
                     tokens = allTokens.filter(t => {
                         if (t.type === 'player') return true;
+                        if (t.type === 'item') return true; // Always show items
                         
                         // Check if enemy is within vision range of any player
                         if (t.type === 'enemy') {
@@ -172,14 +173,14 @@
                             });
                         }
                         
-                        return false; // Don't show items
+                        return false;
                     });
                 } else {
-                    // Fog OFF: show everything except items
-                    tokens = allTokens.filter(t => t.type === 'player' || t.type === 'enemy');
+                    // Fog OFF: show everything
+                    tokens = allTokens;
                 }
                 
-                console.log('Visible tokens:', tokens.length, '(', tokens.filter(t => t.type === 'player').length, 'players,', tokens.filter(t => t.type === 'enemy').length, 'enemies)');
+                console.log('Visible tokens:', tokens.length, '(', tokens.filter(t => t.type === 'player').length, 'players,', tokens.filter(t => t.type === 'enemy').length, 'enemies,', tokens.filter(t => t.type === 'item').length, 'items)');
                 
                 tokens.forEach(token => {
                     if (token.image && !tokenImages[token.image]) {
@@ -254,7 +255,7 @@
                     
                     offCtx.beginPath();
                     offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
-                    offCtx.strokeStyle = token.type === 'player' ? '#2a7fff' : '#ff2a2a';
+                    offCtx.strokeStyle = token.type === 'player' ? '#2a7fff' : token.type === 'enemy' ? '#ff2a2a' : '#ffaa00';
                     offCtx.lineWidth = 3;
                     offCtx.stroke();
                 } else {
@@ -266,6 +267,9 @@
                     } else if (token.type === 'enemy') {
                         offCtx.fillStyle = 'rgba(255, 42, 42, 0.8)';
                         offCtx.strokeStyle = '#ff2a2a';
+                    } else if (token.type === 'item') {
+                        offCtx.fillStyle = 'rgba(255, 170, 0, 0.8)';
+                        offCtx.strokeStyle = '#ffaa00';
                     }
                     offCtx.fill();
                     offCtx.lineWidth = 3;

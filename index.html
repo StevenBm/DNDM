@@ -181,41 +181,41 @@
         }
         #hpEditor {
             position: fixed;
-            background: rgba(20, 20, 20, 0.95);
-            border: 3px solid #4a4a4a;
-            border-radius: 6px;
-            padding: 10px;
             display: none;
             z-index: 10000;
-            min-width: 140px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            pointer-events: auto;
         }
         #hpEditor.show {
-            display: block;
-        }
-        #hpEditor .hp-display {
-            text-align: center;
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 8px;
-            color: #fff;
-        }
-        #hpEditor .hp-controls {
             display: flex;
-            gap: 6px;
-            justify-content: center;
+            gap: 8px;
+            align-items: center;
         }
         #hpEditor button {
-            font-size: 14px;
+            font-size: 24px;
             font-weight: bold;
-            padding: 6px 12px;
-            min-width: 42px;
-            background: #4a4a4a;
-            border: 2px solid #6a6a6a;
+            padding: 0;
+            background: none;
+            border: none;
+            cursor: pointer;
+            text-shadow: 
+                -2px -2px 0 #000,
+                2px -2px 0 #000,
+                -2px 2px 0 #000,
+                2px 2px 0 #000;
+            transition: transform 0.1s;
+            color: #fff;
         }
         #hpEditor button:hover {
-            background: #5a5a5a;
-            border-color: #7a7a7a;
+            transform: scale(1.3);
+        }
+        #hpEditor button:active {
+            transform: scale(1.0);
+        }
+        #hpEditor .minus {
+            color: #ff3333;
+        }
+        #hpEditor .plus {
+            color: #33ff33;
         }
     </style>
 </head>
@@ -253,13 +253,10 @@
         <canvas id="mapCanvas"></canvas>
     </div>
     <div id="hpEditor">
-        <div class="hp-display" id="hpDisplay">0/0</div>
-        <div class="hp-controls">
-            <button id="hpMinus5">-5</button>
-            <button id="hpMinus1">-1</button>
-            <button id="hpPlus1">+1</button>
-            <button id="hpPlus5">+5</button>
-        </div>
+        <button id="hpMinus5" class="minus">-5</button>
+        <button id="hpMinus1" class="minus">-1</button>
+        <button id="hpPlus1" class="plus">+1</button>
+        <button id="hpPlus5" class="plus">+5</button>
     </div>
 
     <script type="module">
@@ -581,6 +578,33 @@
                 reader.readAsDataURL(file);
             }
         });
+
+        function updateHPEditorPosition() {
+            const hpEditor = document.getElementById('hpEditor');
+            if (!selectedTokenForHP || !hpEditor.classList.contains('show')) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const tokenSize = (selectedTokenForHP.size || 1) * 20;
+            
+            // Convert world coordinates to screen coordinates
+            const screenX = rect.left + rect.width / 2 + (selectedTokenForHP.x - canvas.width / 2) * zoom + panX;
+            const screenY = rect.top + rect.height / 2 + (selectedTokenForHP.y - canvas.height / 2) * zoom + panY;
+            
+            // Calculate HP box position
+            const hpBoxY = screenY - tokenSize * zoom - 20 * zoom - 5;
+            
+            // Position buttons above HP box, centered
+            let left = screenX - 85;
+            let top = hpBoxY - 35;
+            
+            // Keep on screen
+            if (left < 10) left = 10;
+            if (left + 170 > window.innerWidth) left = window.innerWidth - 180;
+            if (top < 10) top = hpBoxY + 25;
+            
+            hpEditor.style.left = left + 'px';
+            hpEditor.style.top = top + 'px';
+        }
 
         function renderMap() {
             // STEP 1: Nuclear clear - ensure nothing persists
@@ -1238,26 +1262,37 @@
                 // Show HP editor
                 selectedTokenForHP = clickedToken;
                 const hpEditor = document.getElementById('hpEditor');
-                const hpDisplay = document.getElementById('hpDisplay');
-                hpDisplay.textContent = `${clickedToken.hp}${clickedToken.maxHp ? '/' + clickedToken.maxHp : ''}`;
                 
-                // Position near click but keep on screen
-                let left = e.clientX + 10;
-                let top = e.clientY + 10;
+                // Get the HP box position from the rendering
+                const rect = canvas.getBoundingClientRect();
+                const tokenSize = (clickedToken.size || 1) * 20;
                 
-                // Prevent going off right edge
-                if (left + 160 > window.innerWidth) {
-                    left = e.clientX - 170;
-                }
-                // Prevent going off bottom edge
-                if (top + 120 > window.innerHeight) {
-                    top = e.clientY - 130;
-                }
+                // Convert world coordinates to screen coordinates
+                const screenX = rect.left + rect.width / 2 + (clickedToken.x - canvas.width / 2) * zoom + panX;
+                const screenY = rect.top + rect.height / 2 + (clickedToken.y - canvas.height / 2) * zoom + panY;
+                
+                // Calculate HP box position (same as rendering logic)
+                const hpBoxY = screenY - tokenSize * zoom - 20 * zoom - 5;
+                
+                // Position buttons above HP box, centered
+                let left = screenX - 85; // Center ~170px button width
+                let top = hpBoxY - 35;
+                
+                // Keep on screen
+                if (left < 10) left = 10;
+                if (left + 170 > window.innerWidth) left = window.innerWidth - 180;
+                if (top < 10) top = hpBoxY + 25;
                 
                 hpEditor.style.left = left + 'px';
                 hpEditor.style.top = top + 'px';
                 hpEditor.classList.add('show');
                 console.log('HP editor shown at', left, top);
+                
+                // Store the token and position so we can update if zoom changes
+                hpEditor.dataset.tokenX = clickedToken.x;
+                hpEditor.dataset.tokenY = clickedToken.y;
+                hpEditor.dataset.tokenSize = tokenSize;
+                
                 return;
             }
             
@@ -1305,9 +1340,6 @@
             if (selectedTokenForHP.maxHp) {
                 selectedTokenForHP.hp = Math.min(selectedTokenForHP.maxHp, selectedTokenForHP.hp);
             }
-            
-            const hpDisplay = document.getElementById('hpDisplay');
-            hpDisplay.textContent = `${selectedTokenForHP.hp}${selectedTokenForHP.maxHp ? '/' + selectedTokenForHP.maxHp : ''}`;
             
             renderMap();
             saveState();
