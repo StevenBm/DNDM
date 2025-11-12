@@ -183,11 +183,11 @@
             position: fixed;
             background: rgba(20, 20, 20, 0.95);
             border: 3px solid #4a4a4a;
-            border-radius: 8px;
-            padding: 16px;
+            border-radius: 6px;
+            padding: 10px;
             display: none;
             z-index: 10000;
-            min-width: 180px;
+            min-width: 140px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.5);
         }
         #hpEditor.show {
@@ -195,22 +195,21 @@
         }
         #hpEditor .hp-display {
             text-align: center;
-            font-size: 24px;
+            font-size: 18px;
             font-weight: bold;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
             color: #fff;
         }
         #hpEditor .hp-controls {
             display: flex;
-            gap: 8px;
+            gap: 6px;
             justify-content: center;
-            flex-wrap: wrap;
         }
         #hpEditor button {
-            font-size: 18px;
+            font-size: 14px;
             font-weight: bold;
-            padding: 10px 18px;
-            min-width: 50px;
+            padding: 6px 12px;
+            min-width: 42px;
             background: #4a4a4a;
             border: 2px solid #6a6a6a;
         }
@@ -1013,6 +1012,12 @@
                 e.preventDefault();
             }
             
+            // Close HP editor if open
+            if (selectedTokenForHP) {
+                document.getElementById('hpEditor').classList.remove('show');
+                selectedTokenForHP = null;
+            }
+            
             if (e.button === 1 || (e.shiftKey && e.button === 0)) {
                 isPanning = true;
                 canvas.classList.add('pan-mode');
@@ -1091,9 +1096,10 @@
                 }, 500);
                 
             } else if (mode === 'move') {
-                const clickedToken = tokens.find(t => 
-                    Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < 20
-                );
+                const clickedToken = tokens.find(t => {
+                    const tokenSize = (t.size || 1) * 20;
+                    return Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < tokenSize;
+                });
                 
                 if (clickedToken && (e.ctrlKey || e.metaKey)) {
                     const index = selectedTokens.indexOf(clickedToken);
@@ -1210,6 +1216,14 @@
 
         canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
+            
+            // If HP editor is already open, close it first
+            if (selectedTokenForHP) {
+                document.getElementById('hpEditor').classList.remove('show');
+                selectedTokenForHP = null;
+                return;
+            }
+            
             const pos = screenToCanvas(e.clientX, e.clientY);
             const x = pos.x;
             const y = pos.y;
@@ -1232,12 +1246,12 @@
                 let top = e.clientY + 10;
                 
                 // Prevent going off right edge
-                if (left + 200 > window.innerWidth) {
-                    left = e.clientX - 210;
+                if (left + 160 > window.innerWidth) {
+                    left = e.clientX - 170;
                 }
                 // Prevent going off bottom edge
-                if (top + 150 > window.innerHeight) {
-                    top = e.clientY - 160;
+                if (top + 120 > window.innerHeight) {
+                    top = e.clientY - 130;
                 }
                 
                 hpEditor.style.left = left + 'px';
@@ -1247,6 +1261,7 @@
                 return;
             }
             
+            // If no HP token clicked, do normal deletion
             const clickedSelectedToken = selectedTokens.find(t => {
                 const tokenSize = (t.size || 1) * 20;
                 return Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < tokenSize;
@@ -1258,7 +1273,6 @@
                 renderMap();
                 saveState();
             } else {
-                const tokenSize = 20; // Use default for finding
                 const index = tokens.findIndex(t => {
                     const tSize = (t.size || 1) * 20;
                     return Math.sqrt((t.x - x) ** 2 + (t.y - y) ** 2) < tSize;
