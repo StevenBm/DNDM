@@ -249,44 +249,63 @@
                 offCtx.fillText(token.name, token.x, token.y + 23);
             });
 
-            // Apply fog of war - FIXED VERSION
+            // Apply fog of war - MASK APPROACH
             const fog = currentFog || { enabled: false, radius: 150 };
             if (fog.enabled) {
-                console.log('Drawing fog...');
+                console.log('Drawing fog with mask approach...');
                 
-                // Draw complete darkness
-                offCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
-                offCtx.fillRect(0, 0, canvas.width, canvas.height);
-                console.log('Fog layer drawn');
+                // Restore to screen space
+                offCtx.restore();
                 
-                // If there are tokens, cut out vision circles
                 if (tokens.length > 0) {
-                    console.log('Cutting vision circles for', tokens.length, 'tokens');
+                    console.log('Creating vision mask for', tokens.length, 'tokens');
                     
-                    offCtx.globalCompositeOperation = 'destination-out';
+                    // Create a mask canvas
+                    const maskCanvas = document.createElement('canvas');
+                    maskCanvas.width = canvas.width;
+                    maskCanvas.height = canvas.height;
+                    const maskCtx = maskCanvas.getContext('2d');
+                    
+                    // Fill mask with black (fog)
+                    maskCtx.fillStyle = '#000000';
+                    maskCtx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Apply transform to mask
+                    maskCtx.translate(canvas.width / 2, canvas.height / 2);
+                    maskCtx.scale(zoom, zoom);
+                    maskCtx.translate(-canvas.width / 2 + panX / zoom, -canvas.height / 2 + panY / zoom);
+                    
+                    // Cut out vision circles using destination-out
+                    maskCtx.globalCompositeOperation = 'destination-out';
                     tokens.forEach(token => {
-                        console.log('Circle at', token.x, token.y, 'radius', fog.radius);
-                        const gradient = offCtx.createRadialGradient(
-                            token.x, token.y, fog.radius * 0.5,
+                        console.log('Cutting circle at', token.x, token.y);
+                        const gradient = maskCtx.createRadialGradient(
+                            token.x, token.y, 0,
                             token.x, token.y, fog.radius
                         );
                         gradient.addColorStop(0, 'rgba(0,0,0,1)');
+                        gradient.addColorStop(0.8, 'rgba(0,0,0,0.5)');
                         gradient.addColorStop(1, 'rgba(0,0,0,0)');
-                        offCtx.fillStyle = gradient;
-                        offCtx.beginPath();
-                        offCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
-                        offCtx.fill();
+                        maskCtx.fillStyle = gradient;
+                        maskCtx.beginPath();
+                        maskCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
+                        maskCtx.fill();
                     });
-                    offCtx.globalCompositeOperation = 'source-over';
-                    console.log('Vision circles complete');
+                    
+                    // Apply the mask to the main canvas
+                    offCtx.globalAlpha = 0.95;
+                    offCtx.drawImage(maskCanvas, 0, 0);
+                    offCtx.globalAlpha = 1.0;
+                    console.log('Mask applied');
                 } else {
-                    console.log('No tokens - complete darkness');
+                    console.log('No tokens - drawing complete darkness');
+                    offCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+                    offCtx.fillRect(0, 0, canvas.width, canvas.height);
                 }
             } else {
                 console.log('Fog disabled');
+                offCtx.restore();
             }
-            
-            offCtx.restore();
             
             // Now copy the complete offscreen canvas to the main canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
