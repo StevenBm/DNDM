@@ -131,9 +131,15 @@
                     return;
                 }
                 
+                console.log('%cPLAYER UPDATE', 'color: #00ff00; font-weight: bold');
+                console.log('Fog:', data.fog);
+                console.log('Tokens:', data.tokens?.length);
+                console.log('Zoom:', data.zoom, 'Pan:', data.pan);
+                
                 // Update fog settings
                 if (data.fog) {
                     currentFog = data.fog;
+                    console.log('Updated fog settings:', currentFog);
                 }
                 
                 // Update zoom/pan
@@ -147,6 +153,7 @@
                 
                 // Update tokens - filter for players only
                 tokens = (data.tokens || []).filter(t => t.type === 'player');
+                console.log('Player tokens:', tokens.length);
                 
                 tokens.forEach(token => {
                     if (token.image && !tokenImages[token.image]) {
@@ -183,6 +190,10 @@
 
         function renderMap() {
             if (!mapImage) return;
+
+            console.log('%c=== RENDERING ===', 'color: #00ff00; font-weight: bold');
+            console.log('Tokens:', tokens.length);
+            console.log('Fog enabled:', currentFog.enabled, 'Radius:', currentFog.radius);
 
             // Create an offscreen canvas for clean rendering
             const offscreen = document.createElement('canvas');
@@ -238,26 +249,41 @@
                 offCtx.fillText(token.name, token.x, token.y + 23);
             });
 
-            // Apply fog of war
+            // Apply fog of war - FIXED VERSION
             const fog = currentFog || { enabled: false, radius: 150 };
-            if (fog.enabled && tokens.length > 0) {
+            if (fog.enabled) {
+                console.log('Drawing fog...');
+                
+                // Draw complete darkness
                 offCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
                 offCtx.fillRect(0, 0, canvas.width, canvas.height);
+                console.log('Fog layer drawn');
                 
-                offCtx.globalCompositeOperation = 'destination-out';
-                tokens.forEach(token => {
-                    const gradient = offCtx.createRadialGradient(
-                        token.x, token.y, fog.radius * 0.5,
-                        token.x, token.y, fog.radius
-                    );
-                    gradient.addColorStop(0, 'rgba(0,0,0,1)');
-                    gradient.addColorStop(1, 'rgba(0,0,0,0)');
-                    offCtx.fillStyle = gradient;
-                    offCtx.beginPath();
-                    offCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
-                    offCtx.fill();
-                });
-                offCtx.globalCompositeOperation = 'source-over';
+                // If there are tokens, cut out vision circles
+                if (tokens.length > 0) {
+                    console.log('Cutting vision circles for', tokens.length, 'tokens');
+                    
+                    offCtx.globalCompositeOperation = 'destination-out';
+                    tokens.forEach(token => {
+                        console.log('Circle at', token.x, token.y, 'radius', fog.radius);
+                        const gradient = offCtx.createRadialGradient(
+                            token.x, token.y, fog.radius * 0.5,
+                            token.x, token.y, fog.radius
+                        );
+                        gradient.addColorStop(0, 'rgba(0,0,0,1)');
+                        gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                        offCtx.fillStyle = gradient;
+                        offCtx.beginPath();
+                        offCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
+                        offCtx.fill();
+                    });
+                    offCtx.globalCompositeOperation = 'source-over';
+                    console.log('Vision circles complete');
+                } else {
+                    console.log('No tokens - complete darkness');
+                }
+            } else {
+                console.log('Fog disabled');
             }
             
             offCtx.restore();
@@ -265,6 +291,8 @@
             // Now copy the complete offscreen canvas to the main canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(offscreen, 0, 0);
+            
+            console.log('Render complete');
         }
     </script>
 </body>
