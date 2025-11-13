@@ -184,11 +184,13 @@
             display: none;
             z-index: 10000;
             pointer-events: auto;
+            transform: translateX(-50%); /* Center horizontally */
         }
         #hpEditor.show {
             display: flex;
             gap: 8px;
             align-items: center;
+            justify-content: center;
         }
         #hpEditor button {
             font-size: 24px;
@@ -578,33 +580,6 @@
                 reader.readAsDataURL(file);
             }
         });
-
-        function updateHPEditorPosition() {
-            const hpEditor = document.getElementById('hpEditor');
-            if (!selectedTokenForHP || !hpEditor.classList.contains('show')) return;
-            
-            const rect = canvas.getBoundingClientRect();
-            const tokenSize = (selectedTokenForHP.size || 1) * 20;
-            
-            // Convert world coordinates to screen coordinates
-            const screenX = rect.left + rect.width / 2 + (selectedTokenForHP.x - canvas.width / 2) * zoom + panX;
-            const screenY = rect.top + rect.height / 2 + (selectedTokenForHP.y - canvas.height / 2) * zoom + panY;
-            
-            // Calculate HP box position
-            const hpBoxY = screenY - tokenSize * zoom - 20 * zoom - 5;
-            
-            // Position buttons above HP box, centered
-            let left = screenX - 85;
-            let top = hpBoxY - 35;
-            
-            // Keep on screen
-            if (left < 10) left = 10;
-            if (left + 170 > window.innerWidth) left = window.innerWidth - 180;
-            if (top < 10) top = hpBoxY + 25;
-            
-            hpEditor.style.left = left + 'px';
-            hpEditor.style.top = top + 'px';
-        }
 
         function renderMap() {
             // STEP 1: Nuclear clear - ensure nothing persists
@@ -1010,6 +985,12 @@
         canvas.addEventListener("wheel", (e) => {
             e.preventDefault();
 
+            // Close HP editor when zooming
+            if (selectedTokenForHP) {
+                document.getElementById('hpEditor').classList.remove('show');
+                selectedTokenForHP = null;
+            }
+
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left - rect.width / 2;
             const mouseY = e.clientY - rect.top - rect.height / 2;
@@ -1043,6 +1024,12 @@
             }
             
             if (e.button === 1 || (e.shiftKey && e.button === 0)) {
+                // Close HP editor when panning
+                if (selectedTokenForHP) {
+                    document.getElementById('hpEditor').classList.remove('show');
+                    selectedTokenForHP = null;
+                }
+                
                 isPanning = true;
                 canvas.classList.add('pan-mode');
                 panStart = { x: e.clientX, y: e.clientY };
@@ -1263,7 +1250,7 @@
                 selectedTokenForHP = clickedToken;
                 const hpEditor = document.getElementById('hpEditor');
                 
-                // Get the HP box position from the rendering
+                // Calculate initial position
                 const rect = canvas.getBoundingClientRect();
                 const tokenSize = (clickedToken.size || 1) * 20;
                 
@@ -1274,24 +1261,10 @@
                 // Calculate HP box position (same as rendering logic)
                 const hpBoxY = screenY - tokenSize * zoom - 20 * zoom - 5;
                 
-                // Position buttons above HP box, centered
-                let left = screenX - 85; // Center ~170px button width
-                let top = hpBoxY - 35;
-                
-                // Keep on screen
-                if (left < 10) left = 10;
-                if (left + 170 > window.innerWidth) left = window.innerWidth - 180;
-                if (top < 10) top = hpBoxY + 25;
-                
-                hpEditor.style.left = left + 'px';
-                hpEditor.style.top = top + 'px';
+                // Position buttons centered above HP box (using CSS transform: translateX(-50%))
+                hpEditor.style.left = screenX + 'px';
+                hpEditor.style.top = (hpBoxY - 35) + 'px';
                 hpEditor.classList.add('show');
-                console.log('HP editor shown at', left, top);
-                
-                // Store the token and position so we can update if zoom changes
-                hpEditor.dataset.tokenX = clickedToken.x;
-                hpEditor.dataset.tokenY = clickedToken.y;
-                hpEditor.dataset.tokenSize = tokenSize;
                 
                 return;
             }
