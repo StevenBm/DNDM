@@ -342,7 +342,8 @@ if (currentFog.enabled || fogLayerEnabled) {
     offCtx.restore();
 
     // Apply vision fog first (if enabled)
-  const fog = currentFog || { enabled: false, radius: 150 };
+ // Apply vision fog first (if enabled)
+const fog = currentFog || { enabled: false, radius: 150 };
 
 // We need to combine vision circles fog AND painted fog
 // Both can CLEAR fog, so we take the MINIMUM (lightest) of both
@@ -364,21 +365,15 @@ if (fog.enabled || (fogLayerEnabled && fogLayerImage)) {
     combinedCtx.scale(zoom, zoom);
     combinedCtx.translate(-canvas.width / 2 + panX / zoom, -canvas.height / 2 + panY / zoom);
     
-    // Cut out vision circles (if vision fog enabled)
+    // Cut out vision circles (if vision fog enabled) - HARD EDGE, NO GRADIENT
     if (fog.enabled) {
         const playerTokens = tokens.filter(t => t.type === 'player');
         if (playerTokens.length > 0) {
             console.log('Cutting vision circles for', playerTokens.length, 'players');
             combinedCtx.globalCompositeOperation = 'destination-out';
             playerTokens.forEach(token => {
-                const gradient = combinedCtx.createRadialGradient(
-                    token.x, token.y, 0,
-                    token.x, token.y, fog.radius
-                );
-                gradient.addColorStop(0, 'rgba(0,0,0,1)');
-                gradient.addColorStop(0.8, 'rgba(0,0,0,0.5)');
-                gradient.addColorStop(1, 'rgba(0,0,0,0)');
-                combinedCtx.fillStyle = gradient;
+                // Use solid fill instead of gradient for hard edge
+                combinedCtx.fillStyle = 'rgba(0,0,0,1)';
                 combinedCtx.beginPath();
                 combinedCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
                 combinedCtx.fill();
@@ -387,37 +382,64 @@ if (fog.enabled || (fogLayerEnabled && fogLayerImage)) {
     }
     
     // Also cut out areas cleared by DM (painted fog layer)
-    if (fogLayerEnabled && fogLayerImage) {
-        console.log('Applying painted fog layer');
-        // Use destination-out to clear where painted fog is transparent
-        // and destination-over to keep where painted fog is black
-        combinedCtx.globalCompositeOperation = 'destination-out';
-        
-        // Create inverted fog layer (transparent becomes opaque, opaque becomes transparent)
-        const invertCanvas = document.createElement('canvas');
-        invertCanvas.width = fogLayerImage.width;
-        invertCanvas.height = fogLayerImage.height;
-        const invertCtx = invertCanvas.getContext('2d');
-        
-        // Fill white
-        invertCtx.fillStyle = '#ffffff';
-        invertCtx.fillRect(0, 0, invertCanvas.width, invertCanvas.height);
-        
-        // Use destination-out to remove where fog layer is opaque
-        invertCtx.globalCompositeOperation = 'destination-out';
-        invertCtx.drawImage(fogLayerImage, 0, 0);
-        
-        // Now draw the inverted layer - this cuts out cleared areas
-        combinedCtx.drawImage(invertCanvas, 0, 0);
+ // Also cut out areas cleared by DM (painted fog layer)
+if (fogLayerEnabled && fogLayerImage) {
+    console.log('Applying painted fog layer');
+    
+    // Create a fully opaque version of the fog layer
+    const opaqueCanvas = document.createElement('canvas');
+    opaqueCanvas.width = fogLayerImage.width;
+    opaqueCanvas.height = fogLayerImage.height;
+    const opaqueCtx = opaqueCanvas.getContext('2d');
+    
+    // Draw the fog layer
+    opaqueCtx.drawImage(fogLayerImage, 0, 0);
+    
+    // Get image data and make all semi-transparent pixels fully opaque or fully transparent
+    const imageData = opaqueCtx.getImageData(0, 0, opaqueCanvas.width, opaqueCanvas.height);
+    const data = imageData.data;
+    
+    for (let i = 0; i < data.length; i += 4) {
+        const alpha = data[i + 3];
+        // If alpha > 50% (128), make it fully black
+        // If alpha < 50%, make it fully transparent
+        if (alpha > 128) {
+            data[i] = 0;     // R
+            data[i + 1] = 0; // G
+            data[i + 2] = 0; // B
+            data[i + 3] = 255; // A - fully opaque
+        } else {
+            data[i + 3] = 0; // A - fully transparent
+        }
     }
+    
+    opaqueCtx.putImageData(imageData, 0, 0);
+    
+    // Now create inverted version for cutting out
+    const invertCanvas = document.createElement('canvas');
+    invertCanvas.width = opaqueCanvas.width;
+    invertCanvas.height = opaqueCanvas.height;
+    const invertCtx = invertCanvas.getContext('2d');
+    
+    // Fill white
+    invertCtx.fillStyle = '#ffffff';
+    invertCtx.fillRect(0, 0, invertCanvas.width, invertCanvas.height);
+    
+    // Use destination-out to remove where fog layer is opaque
+    invertCtx.globalCompositeOperation = 'destination-out';
+    invertCtx.drawImage(opaqueCanvas, 0, 0);
+    
+    // Now draw the inverted layer - this cuts out cleared areas
+    combinedCtx.globalCompositeOperation = 'destination-out';
+    combinedCtx.drawImage(invertCanvas, 0, 0);
+}
     
     // Reset composite operation
     combinedCtx.globalCompositeOperation = 'source-over';
     
-    // Apply the combined mask to main canvas
-    offCtx.globalAlpha = 0.95;
-    offCtx.drawImage(combinedMask, 0, 0);
+    // Apply the combined mask to main canvas - FULL OPACITY
     offCtx.globalAlpha = 1.0;
+    offCtx.drawImage(combinedMask, 0, 0);
     console.log('Combined fog applied');
 }
 
