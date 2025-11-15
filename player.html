@@ -83,6 +83,7 @@
         let lastMapData = null;
 		let fogLayerImage = null;
 		let fogLayerEnabled = false;
+		let fogLayerCanvas = null; // ADD THIS
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
             authDomain: "dnd-mapshare.firebaseapp.com",
@@ -149,18 +150,28 @@
 				}
 
 				// Load fog layer image
-				if (data.fogLayer) {
-					const fogImg = new Image();
-					fogImg.onload = () => {
-						fogLayerImage = fogImg;
-						console.log('Fog layer image loaded');
-						renderMap();
-					};
-					fogImg.src = data.fogLayer;
-				} else {
-					fogLayerImage = null;
-					if (mapImage) renderMap();
-				}
+			// Load fog layer image
+					if (data.fogLayer) {
+						const fogImg = new Image();
+						fogImg.onload = () => {
+							fogLayerImage = fogImg;
+							
+							// Also create a canvas version for pixel sampling
+							fogLayerCanvas = document.createElement('canvas');
+							fogLayerCanvas.width = fogImg.width;
+							fogLayerCanvas.height = fogImg.height;
+							const ctx = fogLayerCanvas.getContext('2d');
+							ctx.drawImage(fogImg, 0, 0);
+							
+							console.log('Fog layer image loaded');
+							renderMap();
+						};
+						fogImg.src = data.fogLayer;
+					} else {
+						fogLayerImage = null;
+						fogLayerCanvas = null;
+						if (mapImage) renderMap();
+					}
                 // Update zoom/pan
                 if (data.zoom !== undefined) {
                     zoom = data.zoom;
@@ -171,33 +182,55 @@
                 }
                 
                 // Store all tokens for visibility checking
-                const allTokens = data.tokens || [];
-                const playerTokens = allTokens.filter(t => t.type === 'player');
-                
-                // Determine which tokens to show
-                if (currentFog.enabled && playerTokens.length > 0) {
-                    // Fog ON: show players + enemies within vision range + all items
-                    tokens = allTokens.filter(t => {
-                        if (t.type === 'player') return true;
-                        if (t.type === 'item') return true; // Always show items
-                        
-                        // Check if enemy is within vision range of any player
-                        if (t.type === 'enemy') {
-                            return playerTokens.some(player => {
-                                const dist = Math.sqrt(
-                                    (player.x - t.x) ** 2 + 
-                                    (player.y - t.y) ** 2
-                                );
-                                return dist <= currentFog.radius;
-                            });
-                        }
-                        
-                        return false;
-                    });
-                } else {
-                    // Fog OFF: show everything
-                    tokens = allTokens;
+      // Store all tokens for visibility checking
+const allTokens = data.tokens || [];
+const playerTokens = allTokens.filter(t => t.type === 'player');
+
+// Determine which tokens to show
+if (currentFog.enabled || fogLayerEnabled) {
+    // Show players + items always
+    // Show enemies if they're in cleared fog (vision circles OR painted fog cleared areas)
+    tokens = allTokens.filter(t => {
+        if (t.type === 'player') return true;
+        if (t.type === 'item') return true;
+        
+        // Check if enemy is in visible area
+        if (t.type === 'enemy') {
+            // Check vision circles first
+            const inVisionRange = currentFog.enabled && playerTokens.some(player => {
+                const dist = Math.sqrt(
+                    (player.x - t.x) ** 2 + 
+                    (player.y - t.y) ** 2
+                );
+                return dist <= currentFog.radius;
+            });
+            
+            if (inVisionRange) return true;
+            
+            // Check if in DM-cleared fog area
+            if (fogLayerEnabled && fogLayerCanvas) {
+                try {
+                    // Get pixel data at enemy position
+                    const ctx = fogLayerCanvas.getContext('2d');
+                    const pixelData = ctx.getImageData(Math.floor(t.x), Math.floor(t.y), 1, 1).data;
+                    const alpha = pixelData[3]; // Alpha channel
+                    
+                    // If alpha is low (transparent), fog is cleared here
+                    if (alpha < 200) return true; // Less than ~78% opacity means it's cleared
+                } catch (e) {
+                    console.error('Error checking fog at enemy position:', e);
                 }
+            }
+            
+            return false;
+        }
+        
+        return false;
+    });
+} else {
+    // Fog OFF: show everything
+    tokens = allTokens;
+}
                 
                 console.log('Visible tokens:', tokens.length, '(', tokens.filter(t => t.type === 'player').length, 'players,', tokens.filter(t => t.type === 'enemy').length, 'enemies,', tokens.filter(t => t.type === 'item').length, 'items)');
                 
