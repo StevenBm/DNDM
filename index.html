@@ -339,6 +339,7 @@
         <button id="modePlace">Place</button>
         <button id="resetZoom">Reset Zoom</button>
         <span class="status" id="status">🔄 Connecting...</span>
+		<button id="toggleSync" class="active">⏸️ Pause Sync</button>
 <button id="toggleVisionCircles" class="active">👁️ Vision Circles: ON</button>
 <label style="color:#fff;">Vision:</label>
 <input type="range" id="visionSlider" min="50" max="400" value="150">
@@ -407,6 +408,7 @@
 		let auth = null; // ADD THIS LINE
 		let isPaintingFog = false;
 		let fogLayerEnabled = false; // Add this with other variables
+		let syncEnabled = true; // ADD THIS LINE
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
             authDomain: "dnd-mapshare.firebaseapp.com",
@@ -713,7 +715,11 @@ if (data.fogLayer) {
 
         async function saveState() {
             if (!db) return;
-            
+                if (!syncEnabled) {
+        console.log('Sync paused - not saving to Firebase');
+        statusEl.textContent = '⏸️ Sync Paused';
+        return;
+    }
             console.log('=== SAVE CALLED ===');
             console.log('Tokens to save:', tokens.length);
             
@@ -1707,7 +1713,23 @@ document.getElementById('passwordInput').addEventListener('keypress', (e) => {
         document.getElementById('loginBtn').click();
     }
 });
-
+// Toggle sync button
+document.getElementById('toggleSync').addEventListener('click', () => {
+    syncEnabled = !syncEnabled;
+    const btn = document.getElementById('toggleSync');
+    
+    if (syncEnabled) {
+        btn.textContent = '⏸️ Pause Sync';
+        btn.classList.add('active');
+        statusEl.textContent = '▶️ Resuming sync...';
+        // Immediately save current state when resuming
+        saveState();
+    } else {
+        btn.textContent = '▶️ Resume Sync';
+        btn.classList.remove('active');
+        statusEl.textContent = '⏸️ Sync Paused';
+    }
+});
 // Logout handler
 document.getElementById('logoutBtn').addEventListener('click', async () => {
     try {
