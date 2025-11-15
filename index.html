@@ -219,6 +219,9 @@
         #hpEditor .plus {
             color: #33ff33;
         }
+		#mapCanvas.paint-mode {
+    cursor: crosshair;
+}
     </style>
 </head>
 <body>
@@ -247,9 +250,15 @@
         <button id="modePlace">Place</button>
         <button id="resetZoom">Reset Zoom</button>
         <span class="status" id="status">🔄 Connecting...</span>
-        <button id="toggleFog" class="active">☁️ Fog: ON</button>
-        <label style="color:#fff;">Vision radius:</label>
-        <input type="range" id="visionSlider" min="50" max="400" value="150">
+<button id="toggleVisionCircles" class="active">👁️ Vision Circles: ON</button>
+<label style="color:#fff;">Vision:</label>
+<input type="range" id="visionSlider" min="50" max="400" value="150">
+<button id="toggleFogLayer">🖌️ Fog Layer: OFF</button>
+<button id="toggleFogPaint">✏️ Paint Mode</button>
+<label style="color:#fff;">Brush:</label>
+<input type="range" id="brushSlider" min="20" max="200" value="80">
+<button id="clearFogLayer">Clear All</button>
+<button id="fillFogLayer">Fill All</button>
     </div>
     <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
@@ -282,6 +291,7 @@
         let itemCount = 0;
         let fogEnabled = true;
         let visionRadius = 150;
+		let visionCirclesEnabled = true; // Add after visionRadius
         let tokenImages = {};
         let playerLibrary = {};
         let enemyLibrary = {};
@@ -300,7 +310,13 @@
         let selectionStart = { x: 0, y: 0 };
         let selectionEnd = { x: 0, y: 0 };
         let isPlacingToken = false;
-
+		let fogCanvas = null;
+		let fogCtx = null;
+		let fogPaintMode = false;
+		let brushSize = 80;
+		let mousePos = { x: 0, y: 0 }; // ADD THIS
+		let isPaintingFog = false;
+		let fogLayerEnabled = false; // Add this with other variables
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
             authDomain: "dnd-mapshare.firebaseapp.com",
@@ -310,12 +326,73 @@
             messagingSenderId: "624008039203",
             appId: "1:624008039203:web:46ee20fd32f7d8f4f95a96"
         };
+		function initFogCanvas() {
+    fogCanvas = document.createElement('canvas');
+    fogCtx = fogCanvas.getContext('2d');
+}
 
+function resetFogCanvas() {
+    if (!mapImage) return;
+    fogCanvas.width = mapImage.width;
+    fogCanvas.height = mapImage.height;
+    fogCtx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
+}
+
+function clearFogCanvas() {
+    if (!fogCanvas) return;
+    fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
+}
+
+function paintFog(x, y, eraseMode) {
+    if (!fogCanvas || fogCanvas.width === 0) {
+        if (!mapImage) {
+            statusEl.textContent = '⚠️ Load a map first!';
+            statusEl.classList.add('error');
+            setTimeout(() => {
+                statusEl.textContent = '✓ Connected to Firebase';
+                statusEl.classList.remove('error');
+            }, 2000);
+        }
+        return;
+    }
+    
+    // FIXED: Use destination-out to REMOVE fog (reveal), source-over to ADD fog (hide)
+    fogCtx.globalCompositeOperation = eraseMode ? 'source-over' : 'destination-out';
+    
+    const gradient = fogCtx.createRadialGradient(x, y, 0, x, y, brushSize);
+    if (eraseMode) {
+        // Adding fog back (hiding)
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
+        gradient.addColorStop(0.7, 'rgba(0, 0, 0, 0.4)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        statusEl.textContent = '🖌️ Hiding area...';
+    } else {
+        // Removing fog (revealing)
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 1)');
+        gradient.addColorStop(0.7, 'rgba(0, 0, 0, 0.5)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        statusEl.textContent = '✏️ Revealing area...';
+    }
+    
+    fogCtx.fillStyle = gradient;
+    fogCtx.beginPath();
+    fogCtx.arc(x, y, brushSize, 0, Math.PI * 2);
+    fogCtx.fill();
+    
+    fogCtx.globalCompositeOperation = 'source-over';
+    
+    renderMap();
+}
         try {
             const app = initializeApp(firebaseConfig);
             db = getDatabase(app);
             statusEl.textContent = '✓ Connected to Firebase';
             loadState();
+			initFogCanvas(); // ADD THIS LINE
+			fogLayerEnabled = true;
+			document.getElementById('toggleFogLayer').classList.add('active');
+			document.getElementById('toggleFogLayer').textContent = '🖌️ Fog Layer: ON';
         } catch (e) {
             statusEl.textContent = '✗ Firebase connection failed';
             statusEl.classList.add('error');
@@ -323,7 +400,7 @@
         }
 
         let mapLibrary = {};
-
+		
         async function scanMapsFolder() {
             try {
                 const repoOwner = 'StevenBm';
@@ -420,8 +497,8 @@
         function loadMapFromUrl(url) {
             const img = new Image();
             fogEnabled = true;
-            document.getElementById('toggleFog').textContent = '☁️ Fog: ON';
-            document.getElementById('toggleFog').classList.add('active');
+		 document.getElementById('toggleFogLayer').classList.add('active');
+        document.getElementById('toggleFogLayer').textContent = '🖌️ Fog Layer: ON';
             img.onload = () => {
                 mapImage = img;
                 canvas.width = img.width;
@@ -429,6 +506,10 @@
                 zoom = 1;
                 panX = 0;
                 panY = 0;
+				resetFogCanvas(); // ADD THIS LINE
+				fogLayerEnabled = true; // ADD THIS
+		 document.getElementById('toggleFogLayer').classList.add('active');
+        document.getElementById('toggleFogLayer').textContent = '🖌️ Fog Layer: ON';
                 renderMap();
                 saveState();
             };
@@ -494,7 +575,26 @@
                                 loadTokenImage(token.image);
                             }
                         });
-                        
+if (data.fogLayerEnabled !== undefined) {
+    fogLayerEnabled = data.fogLayerEnabled;
+    const btn = document.getElementById('toggleFogLayer');
+    btn.textContent = fogLayerEnabled ? '🖌️ Fog Layer: ON' : '🖌️ Fog Layer: OFF';
+    btn.classList.toggle('active', fogLayerEnabled);
+}
+
+if (data.fogLayer) {
+    const img = new Image();
+    img.onload = () => {
+        if (!fogCanvas || fogCanvas.width !== img.width || fogCanvas.height !== img.height) {
+            fogCanvas.width = img.width;
+            fogCanvas.height = img.height;
+        }
+        fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
+        fogCtx.drawImage(img, 0, 0);
+        renderMap();
+    };
+    img.src = data.fogLayer;
+}
                         if (mapImage) {
                             renderMap();
                         }
@@ -537,6 +637,8 @@
                         enabled: fogEnabled,
                         radius: visionRadius
                     },
+					fogLayer: fogCanvas && fogCanvas.width > 0 ? fogCanvas.toDataURL('image/png') : null, // ADD THIS
+					 fogLayerEnabled: fogLayerEnabled, // ADD THIS
                     zoom: zoom,
                     pan: { x: panX, y: panY },
                     timestamp: Date.now()
@@ -572,6 +674,10 @@
                         zoom = 1;
                         panX = 0;
                         panY = 0;
+						resetFogCanvas(); // ADD THIS LINE
+						 fogLayerEnabled = true; // ADD THIS
+						document.getElementById('toggleFogLayer').classList.add('active'); // ADD THIS
+						document.getElementById('toggleFogLayer').textContent = '🖌️ Fog Layer: ON'; // ADD THIS
                         renderMap();
                         saveState();
                     };
@@ -603,10 +709,38 @@
             if (mapImage) {
                 ctx.drawImage(mapImage, 0, 0);
             }
-            
+			if (fogLayerEnabled && fogCanvas && fogCanvas.width > 0) {
+				ctx.save();
+    ctx.globalAlpha = 0.6; // ADD THIS - makes fog 60% opaque (40% transparent)
+    ctx.drawImage(fogCanvas, 0, 0);
+    ctx.restore(); // ADD THIS
+			}
             // STEP 4: Draw tokens
             renderTokens();
-            
+			if (visionCirclesEnabled) {
+				const playerTokens = tokens.filter(t => t.type === 'player');
+				playerTokens.forEach(token => {
+					ctx.beginPath();
+					ctx.arc(token.x, token.y, visionRadius, 0, Math.PI * 2);
+					ctx.strokeStyle = 'rgba(42, 127, 255, 0.3)';
+					ctx.lineWidth = 2 / zoom;
+					ctx.setLineDash([10 / zoom, 10 / zoom]);
+					ctx.stroke();
+					ctx.setLineDash([]);
+				});
+			}
+								if (fogEnabled) {
+			const playerTokens = tokens.filter(t => t.type === 'player');
+			playerTokens.forEach(token => {
+				ctx.beginPath();
+				ctx.arc(token.x, token.y, visionRadius, 0, Math.PI * 2);
+				ctx.strokeStyle = 'rgba(42, 127, 255, 0.3)';
+				ctx.lineWidth = 2 / zoom;
+				ctx.setLineDash([10 / zoom, 10 / zoom]);
+				ctx.stroke();
+				ctx.setLineDash([]);
+			});
+		}
             // STEP 5: Draw selection box
             if (isSelecting && selectionStart.x !== undefined) {
                 ctx.strokeStyle = '#2a7fff';
@@ -628,7 +762,25 @@
                 ctx.strokeRect(x, y, width, height);
                 ctx.setLineDash([]);
             }
-            
+             if (mode === 'fogpaint' && mousePos.x !== undefined) {
+        ctx.beginPath();
+        ctx.arc(mousePos.x, mousePos.y, brushSize, 0, Math.PI * 2);
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2 / zoom;
+        ctx.setLineDash([5 / zoom, 5 / zoom]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Draw crosshair in center
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 1 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(mousePos.x - 10 / zoom, mousePos.y);
+        ctx.lineTo(mousePos.x + 10 / zoom, mousePos.y);
+        ctx.moveTo(mousePos.x, mousePos.y - 10 / zoom);
+        ctx.lineTo(mousePos.x, mousePos.y + 10 / zoom);
+        ctx.stroke();
+    }
             // STEP 6: Reset transform
             ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
@@ -960,19 +1112,68 @@
             selectedTokens = [];
             renderMap();
         });
+document.getElementById('visionSlider').addEventListener('input', (e) => {
+    visionRadius = parseInt(e.target.value);
+    renderMap();
+    saveState();
+});
 
-        document.getElementById('visionSlider').addEventListener('input', (e) => {
-            visionRadius = parseInt(e.target.value);
-            saveState();
-        });
+document.getElementById('brushSlider').addEventListener('input', (e) => {
+    brushSize = parseInt(e.target.value);
+});
 
-        document.getElementById('toggleFog').addEventListener('click', () => {
-            fogEnabled = !fogEnabled;
-            const btn = document.getElementById('toggleFog');
-            btn.textContent = fogEnabled ? '☁️ Fog: ON' : '🌤️ Fog: OFF';
-            btn.classList.toggle('active', fogEnabled);
-            saveState();
-        });
+// Toggle fog layer visibility (separate from vision circles)
+document.getElementById('toggleFogLayer').addEventListener('click', () => {
+    fogLayerEnabled = !fogLayerEnabled;
+    const btn = document.getElementById('toggleFogLayer');
+    btn.textContent = fogLayerEnabled ? '🖌️ Fog Layer: ON' : '🖌️ Fog Layer: OFF';
+    btn.classList.toggle('active', fogLayerEnabled);
+    renderMap();
+    saveState();
+});
+
+// Toggle paint mode
+document.getElementById('toggleFogPaint').addEventListener('click', () => {
+    fogPaintMode = !fogPaintMode;
+    const btn = document.getElementById('toggleFogPaint');
+    btn.classList.toggle('active', fogPaintMode);
+    
+    if (fogPaintMode) {
+        mode = 'fogpaint';
+        canvas.classList.add('paint-mode');
+        canvas.classList.remove('move-mode');
+        canvas.classList.remove('pan-mode');
+        document.getElementById('modeMove').classList.remove('active');
+        document.getElementById('modePlace').classList.remove('active');
+        statusEl.textContent = '🖌️ Paint Mode: Left-click to reveal, Ctrl+click to hide';
+    } else {
+        mode = 'move';
+        canvas.classList.remove('paint-mode');
+        canvas.classList.add('move-mode');
+        document.getElementById('modeMove').classList.add('active');
+        statusEl.textContent = '✓ Connected to Firebase';
+    }
+});
+
+document.getElementById('clearFogLayer').addEventListener('click', () => {
+    clearFogCanvas();
+    renderMap();
+    saveState();
+});
+
+document.getElementById('fillFogLayer').addEventListener('click', () => {
+    resetFogCanvas();
+    renderMap();
+    saveState();
+});
+
+document.getElementById('toggleVisionCircles').addEventListener('click', () => {
+    visionCirclesEnabled = !visionCirclesEnabled;
+    const btn = document.getElementById('toggleVisionCircles');
+    btn.textContent = visionCirclesEnabled ? '👁️ Vision Circles: ON' : '👁️ Vision Circles: OFF';
+    btn.classList.toggle('active', visionCirclesEnabled);
+    renderMap();
+});
 
         document.getElementById('resetZoom').addEventListener('click', () => {
             zoom = 1;
@@ -1044,7 +1245,12 @@
             const y = pos.y;
             
             console.log('CLICK - World:', x, y);
-            
+if (mode === 'fogpaint') {
+    isPaintingFog = true;
+    paintFog(x, y, e.ctrlKey || e.metaKey);
+    return;
+}
+
             if (mode === 'place' && placeType) {
                 isPlacingToken = true;
                 
@@ -1139,7 +1345,9 @@
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            if (isPanning) {
+                const pos = screenToCanvas(e.clientX, e.clientY);
+				mousePos = pos;
+			if (isPanning) {
                 const dx = e.clientX - panStart.x;
                 const dy = e.clientY - panStart.y;
                 panX += dx;
@@ -1148,7 +1356,14 @@
                 renderMap();
                 return;
             }
-
+if (isPaintingFog && mode === 'fogpaint') {
+    const pos = screenToCanvas(e.clientX, e.clientY);
+    paintFog(pos.x, pos.y, e.ctrlKey || e.metaKey);
+    return;
+}
+  if (mode === 'fogpaint') {
+        renderMap(); // Redraw to show brush preview
+    }
             if (isSelecting) {
                 const pos = screenToCanvas(e.clientX, e.clientY);
                 selectionEnd.x = pos.x;
@@ -1179,6 +1394,15 @@
                 saveState();
                 return;
             }
+if (isPaintingFog) {
+    isPaintingFog = false;
+    statusEl.textContent = '💾 Saving...';
+    saveState();
+    setTimeout(() => {
+        statusEl.textContent = '✓ Connected to Firebase';
+    }, 1000);
+    return;
+}
             
             if (isSelecting) {
                 isSelecting = false;
@@ -1209,6 +1433,14 @@
                 canvas.classList.remove('pan-mode');
                 saveState();
             }
+if (isPaintingFog) {
+    isPaintingFog = false;
+    statusEl.textContent = '💾 Saving...';
+    saveState();
+    setTimeout(() => {
+        statusEl.textContent = '✓ Connected to Firebase';
+    }, 1000);
+}
             if (selectedTokens.length > 0) {
                 selectedTokens.forEach(t => delete t.dragOffset);
                 saveState();

@@ -81,7 +81,8 @@
         let panX = 0;
         let panY = 0;
         let lastMapData = null;
-
+		let fogLayerImage = null;
+		let fogLayerEnabled = false;
         const firebaseConfig = {
             apiKey: "AIzaSyBJeBvSKJucgU4UrWQVWSzexP9djl0wk0w",
             authDomain: "dnd-mapshare.firebaseapp.com",
@@ -141,7 +142,25 @@
                     currentFog = data.fog;
                     console.log('Updated fog settings:', currentFog);
                 }
-                
+// Update fog layer enabled state
+				if (data.fogLayerEnabled !== undefined) {
+					fogLayerEnabled = data.fogLayerEnabled;
+					console.log('Fog layer enabled:', fogLayerEnabled);
+				}
+
+				// Load fog layer image
+				if (data.fogLayer) {
+					const fogImg = new Image();
+					fogImg.onload = () => {
+						fogLayerImage = fogImg;
+						console.log('Fog layer image loaded');
+						renderMap();
+					};
+					fogImg.src = data.fogLayer;
+				} else {
+					fogLayerImage = null;
+					if (mapImage) renderMap();
+				}
                 // Update zoom/pan
                 if (data.zoom !== undefined) {
                     zoom = data.zoom;
@@ -187,7 +206,6 @@
                         loadTokenImage(token.image);
                     }
                 });
-                
                 // Update map only if it changed
                 if (data.mapData && data.mapData !== lastMapData) {
                     lastMapData = data.mapData;
@@ -215,145 +233,166 @@
             });
         }
 
-        function renderMap() {
-            if (!mapImage) return;
+     function renderMap() {
+    if (!mapImage) return;
 
-            console.log('%c=== RENDERING ===', 'color: #00ff00; font-weight: bold');
-            console.log('Tokens:', tokens.length);
-            console.log('Fog enabled:', currentFog.enabled, 'Radius:', currentFog.radius);
+    console.log('%c=== RENDERING ===', 'color: #00ff00; font-weight: bold');
+    console.log('Tokens:', tokens.length);
+    console.log('Fog enabled:', currentFog.enabled, 'Radius:', currentFog.radius);
 
-            // Create an offscreen canvas for clean rendering
-            const offscreen = document.createElement('canvas');
-            offscreen.width = canvas.width;
-            offscreen.height = canvas.height;
-            const offCtx = offscreen.getContext('2d');
+    // Create an offscreen canvas for clean rendering
+    const offscreen = document.createElement('canvas');
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+    const offCtx = offscreen.getContext('2d');
+    
+    // Apply transform on offscreen canvas
+    offCtx.save();
+    offCtx.translate(canvas.width / 2, canvas.height / 2);
+    offCtx.scale(zoom, zoom);
+    offCtx.translate(-canvas.width / 2 + panX / zoom, -canvas.height / 2 + panY / zoom);
+    
+    // Draw map
+    offCtx.drawImage(mapImage, 0, 0);
+
+    // Draw all visible tokens
+    tokens.forEach(token => {
+        const tokenSize = (token.size || 1) * 20;
+        const imageSize = tokenSize * 2;
+        
+        if (token.image && tokenImages[token.image]) {
+            const img = tokenImages[token.image];
             
-            // Apply transform on offscreen canvas
             offCtx.save();
-            offCtx.translate(canvas.width / 2, canvas.height / 2);
-            offCtx.scale(zoom, zoom);
-            offCtx.translate(-canvas.width / 2 + panX / zoom, -canvas.height / 2 + panY / zoom);
+            offCtx.beginPath();
+            offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
+            offCtx.closePath();
+            offCtx.clip();
+            offCtx.drawImage(img, token.x - tokenSize, token.y - tokenSize, imageSize, imageSize);
+            offCtx.restore();
             
-            // Draw map
-            offCtx.drawImage(mapImage, 0, 0);
-
-            // Draw all visible tokens
-            tokens.forEach(token => {
-                const tokenSize = (token.size || 1) * 20;
-                const imageSize = tokenSize * 2;
-                
-                if (token.image && tokenImages[token.image]) {
-                    const img = tokenImages[token.image];
-                    
-                    offCtx.save();
-                    offCtx.beginPath();
-                    offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
-                    offCtx.closePath();
-                    offCtx.clip();
-                    offCtx.drawImage(img, token.x - tokenSize, token.y - tokenSize, imageSize, imageSize);
-                    offCtx.restore();
-                    
-                    offCtx.beginPath();
-                    offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
-                    offCtx.strokeStyle = token.type === 'player' ? '#2a7fff' : token.type === 'enemy' ? '#ff2a2a' : '#ffaa00';
-                    offCtx.lineWidth = 3;
-                    offCtx.stroke();
-                } else {
-                    offCtx.beginPath();
-                    offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
-                    if (token.type === 'player') {
-                        offCtx.fillStyle = 'rgba(42, 127, 255, 0.8)';
-                        offCtx.strokeStyle = '#2a7fff';
-                    } else if (token.type === 'enemy') {
-                        offCtx.fillStyle = 'rgba(255, 42, 42, 0.8)';
-                        offCtx.strokeStyle = '#ff2a2a';
-                    } else if (token.type === 'item') {
-                        offCtx.fillStyle = 'rgba(255, 170, 0, 0.8)';
-                        offCtx.strokeStyle = '#ffaa00';
-                    }
-                    offCtx.fill();
-                    offCtx.lineWidth = 3;
-                    offCtx.stroke();
-                }
-                
-                // Draw name
-                offCtx.fillStyle = '#fff';
-                offCtx.font = 'bold 11px Arial';
-                offCtx.textAlign = 'center';
-                offCtx.textBaseline = 'top';
-                offCtx.strokeStyle = '#000';
-                offCtx.lineWidth = 3;
-                offCtx.strokeText(token.name, token.x, token.y + tokenSize + 3);
-                offCtx.fillText(token.name, token.x, token.y + tokenSize + 3);
-            });
-
-            // Apply fog of war - MASK APPROACH
-            const fog = currentFog || { enabled: false, radius: 150 };
-            if (fog.enabled) {
-                console.log('Drawing fog with mask approach...');
-                
-                // Get only player tokens for vision circles
-                const playerTokens = tokens.filter(t => t.type === 'player');
-                
-                // Restore to screen space
-                offCtx.restore();
-                
-                if (playerTokens.length > 0) {
-                    console.log('Creating vision mask for', playerTokens.length, 'player tokens');
-                    
-                    // Create a mask canvas
-                    const maskCanvas = document.createElement('canvas');
-                    maskCanvas.width = canvas.width;
-                    maskCanvas.height = canvas.height;
-                    const maskCtx = maskCanvas.getContext('2d');
-                    
-                    // Fill mask with black (fog)
-                    maskCtx.fillStyle = '#000000';
-                    maskCtx.fillRect(0, 0, canvas.width, canvas.height);
-                    
-                    // Apply transform to mask
-                    maskCtx.translate(canvas.width / 2, canvas.height / 2);
-                    maskCtx.scale(zoom, zoom);
-                    maskCtx.translate(-canvas.width / 2 + panX / zoom, -canvas.height / 2 + panY / zoom);
-                    
-                    // Cut out vision circles using destination-out
-                    maskCtx.globalCompositeOperation = 'destination-out';
-                    playerTokens.forEach(token => {
-                        console.log('Cutting circle at', token.x, token.y);
-                        const gradient = maskCtx.createRadialGradient(
-                            token.x, token.y, 0,
-                            token.x, token.y, fog.radius
-                        );
-                        gradient.addColorStop(0, 'rgba(0,0,0,1)');
-                        gradient.addColorStop(0.8, 'rgba(0,0,0,0.5)');
-                        gradient.addColorStop(1, 'rgba(0,0,0,0)');
-                        maskCtx.fillStyle = gradient;
-                        maskCtx.beginPath();
-                        maskCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
-                        maskCtx.fill();
-                    });
-                    
-                    // Apply the mask to the main canvas
-                    offCtx.globalAlpha = 0.95;
-                    offCtx.drawImage(maskCanvas, 0, 0);
-                    offCtx.globalAlpha = 1.0;
-                    console.log('Mask applied');
-                } else {
-                    console.log('No player tokens - drawing complete darkness');
-                    offCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
-                    offCtx.fillRect(0, 0, canvas.width, canvas.height);
-                }
-            } else {
-                console.log('Fog disabled');
-                offCtx.restore();
+            offCtx.beginPath();
+            offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
+            offCtx.strokeStyle = token.type === 'player' ? '#2a7fff' : token.type === 'enemy' ? '#ff2a2a' : '#ffaa00';
+            offCtx.lineWidth = 3;
+            offCtx.stroke();
+        } else {
+            offCtx.beginPath();
+            offCtx.arc(token.x, token.y, tokenSize, 0, Math.PI * 2);
+            if (token.type === 'player') {
+                offCtx.fillStyle = 'rgba(42, 127, 255, 0.8)';
+                offCtx.strokeStyle = '#2a7fff';
+            } else if (token.type === 'enemy') {
+                offCtx.fillStyle = 'rgba(255, 42, 42, 0.8)';
+                offCtx.strokeStyle = '#ff2a2a';
+            } else if (token.type === 'item') {
+                offCtx.fillStyle = 'rgba(255, 170, 0, 0.8)';
+                offCtx.strokeStyle = '#ffaa00';
             }
-            
-            // Now copy the complete offscreen canvas to the main canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(offscreen, 0, 0);
-            
-            console.log('Render complete');
+            offCtx.fill();
+            offCtx.lineWidth = 3;
+            offCtx.stroke();
         }
+        
+        // Draw name
+        offCtx.fillStyle = '#fff';
+        offCtx.font = 'bold 11px Arial';
+        offCtx.textAlign = 'center';
+        offCtx.textBaseline = 'top';
+        offCtx.strokeStyle = '#000';
+        offCtx.lineWidth = 3;
+        offCtx.strokeText(token.name, token.x, token.y + tokenSize + 3);
+        offCtx.fillText(token.name, token.x, token.y + tokenSize + 3);
+    });
+
+    // Restore transform before applying fog
+    offCtx.restore();
+
+    // Apply vision fog first (if enabled)
+  const fog = currentFog || { enabled: false, radius: 150 };
+
+// We need to combine vision circles fog AND painted fog
+// Both can CLEAR fog, so we take the MINIMUM (lightest) of both
+if (fog.enabled || (fogLayerEnabled && fogLayerImage)) {
+    console.log('Creating combined fog mask');
+    
+    // Create the final mask canvas
+    const combinedMask = document.createElement('canvas');
+    combinedMask.width = canvas.width;
+    combinedMask.height = canvas.height;
+    const combinedCtx = combinedMask.getContext('2d');
+    
+    // Start with complete darkness
+    combinedCtx.fillStyle = '#000000';
+    combinedCtx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Apply transform
+    combinedCtx.translate(canvas.width / 2, canvas.height / 2);
+    combinedCtx.scale(zoom, zoom);
+    combinedCtx.translate(-canvas.width / 2 + panX / zoom, -canvas.height / 2 + panY / zoom);
+    
+    // Cut out vision circles (if vision fog enabled)
+    if (fog.enabled) {
+        const playerTokens = tokens.filter(t => t.type === 'player');
+        if (playerTokens.length > 0) {
+            console.log('Cutting vision circles for', playerTokens.length, 'players');
+            combinedCtx.globalCompositeOperation = 'destination-out';
+            playerTokens.forEach(token => {
+                const gradient = combinedCtx.createRadialGradient(
+                    token.x, token.y, 0,
+                    token.x, token.y, fog.radius
+                );
+                gradient.addColorStop(0, 'rgba(0,0,0,1)');
+                gradient.addColorStop(0.8, 'rgba(0,0,0,0.5)');
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                combinedCtx.fillStyle = gradient;
+                combinedCtx.beginPath();
+                combinedCtx.arc(token.x, token.y, fog.radius, 0, Math.PI * 2);
+                combinedCtx.fill();
+            });
+        }
+    }
+    
+    // Also cut out areas cleared by DM (painted fog layer)
+    if (fogLayerEnabled && fogLayerImage) {
+        console.log('Applying painted fog layer');
+        // Use destination-out to clear where painted fog is transparent
+        // and destination-over to keep where painted fog is black
+        combinedCtx.globalCompositeOperation = 'destination-out';
+        
+        // Create inverted fog layer (transparent becomes opaque, opaque becomes transparent)
+        const invertCanvas = document.createElement('canvas');
+        invertCanvas.width = fogLayerImage.width;
+        invertCanvas.height = fogLayerImage.height;
+        const invertCtx = invertCanvas.getContext('2d');
+        
+        // Fill white
+        invertCtx.fillStyle = '#ffffff';
+        invertCtx.fillRect(0, 0, invertCanvas.width, invertCanvas.height);
+        
+        // Use destination-out to remove where fog layer is opaque
+        invertCtx.globalCompositeOperation = 'destination-out';
+        invertCtx.drawImage(fogLayerImage, 0, 0);
+        
+        // Now draw the inverted layer - this cuts out cleared areas
+        combinedCtx.drawImage(invertCanvas, 0, 0);
+    }
+    
+    // Reset composite operation
+    combinedCtx.globalCompositeOperation = 'source-over';
+    
+    // Apply the combined mask to main canvas
+    offCtx.globalAlpha = 0.95;
+    offCtx.drawImage(combinedMask, 0, 0);
+    offCtx.globalAlpha = 1.0;
+    console.log('Combined fog applied');
+}
+
+// Now copy the complete offscreen canvas to the main canvas
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+ctx.drawImage(offscreen, 0, 0);
+
+console.log('Render complete');}
     </script>
 </body>
 </html>
